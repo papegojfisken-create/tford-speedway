@@ -1,0 +1,5 @@
+# Not part of the website: send-to-a-friend copies and the Claude artifact version
+*.zip
+T-Ford-Speedway.html
+web/
+artifact.html
