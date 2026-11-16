@@ -378,7 +378,7 @@
   $('menu').addEventListener('click', function (e) { if (!e.target.closest('.swatches, .ai-row, .online-row')) startDrive(); });
 
   // online with a room code (only when the game is opened as a normal page, not as an artifact)
-  var NET_ERRORS = { load: 'Could not reach the connection service. Check the internet.', code: 'A code has 5 letters or numbers.', 'peer-unavailable': 'No game with that code. Check the code with the host.', timeout: 'No answer from the host. Try again.', 'unavailable-id': 'Could not create a code. Try again.' };
+  var NET_ERRORS = { load: 'Could not reach the connection service. Check the internet.', code: 'A code has 5 letters or numbers.', 'peer-unavailable': 'No game with that code. Check the code with the host.', timeout: 'No answer from the host. Try again.', 'unavailable-id': 'Could not create a code. Try again.', full: 'That game is full (9 players).' };
   function netBusy(b) { $('btnHost').disabled = b; $('btnJoin').disabled = b; $('joinCode').disabled = b; }
   function netDone(err) {
     netBusy(false);

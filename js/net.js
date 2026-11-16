@@ -40,31 +40,14 @@
     }).catch(drop);
   }
 
-  // ---------- room codes: direct connection between computers, for when the game is NOT running as an artifact ----------
-  // One player hosts and gets a short code; the others type it in. The free PeerJS service is used only to help the
-  // computers find each other; after that the car positions travel directly between them (WebRTC).
-  net.canCode = !window.claude && !!window.RTCPeerConnection; // artifacts do not allow this kind of connection
+  // ---------- room codes: online play for when the game is NOT running as an artifact ----------
+  // One player hosts and gets a short code; the others type it in. Everyone connects to a small relay program on
+  // Cloudflare (relay/ in this project), which passes each player's car position on to the others in the same room.
+  // This works through home routers, unlike a direct computer-to-computer connection.
+  var RELAY = 'wss://tford-relay.papegojfisken.workers.dev';
+  net.canCode = !window.claude && !!window.WebSocket; // artifacts do not allow this kind of connection
   net.code = null;
   function frz(o) { return Object.freeze(JSON.parse(JSON.stringify(o))); }
-  // Relay (TURN) servers from the website (functions/api/turn.js) for players whose routers block direct connections.
-  // If the site has none (a local test server, a plain file), PeerJS's own defaults are used.
-  var iceOpts = null;
-  function getIce(done) {
-    if (iceOpts !== null || location.protocol.indexOf('http') !== 0 || !window.fetch) return done();
-    var finished = false, t = setTimeout(function () { if (!finished) { finished = true; iceOpts = {}; done(); } }, 5000);
-    fetch('/api/turn', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
-      iceOpts = d && Array.isArray(d.iceServers) && d.iceServers.length ? { config: { iceServers: d.iceServers } } : {};
-    }).catch(function () { iceOpts = {}; }).then(function () { if (!finished) { finished = true; clearTimeout(t); done(); } });
-  }
-  function loadPeer(done) {
-    getIce(function () {
-      if (window.Peer) return done();
-      var s = document.createElement('script'); s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-      s.onload = function () { done(window.Peer ? null : 'load'); }; s.onerror = function () { done('load'); };
-      document.head.appendChild(s);
-    });
-  }
-  net.relay = function () { return !!(iceOpts && iceOpts.config); };
   function codeRoom(myId, others, sendOut) {
     var pres = {}, mine = frz({});
     return {
@@ -80,56 +63,43 @@
       connected: function () { return true; }
     };
   }
+  // connect to the relay room for this code; cb(error) or cb(null)
+  function relayRoom(code, asHost, cb) {
+    var ws, others = {}, done = false, live = false;
+    function finish(e) { if (!done) { done = true; clearTimeout(timer); cb(e); } }
+    var timer = setTimeout(function () { try { ws.close(); } catch (e) { /* fine */ } finish('timeout'); }, 12000);
+    try { ws = new WebSocket(RELAY + '/room/' + code + (asHost ? '?host=1' : '')); } catch (e) { return finish('load'); }
+    function lost() {
+      if (!live) return; live = false;
+      net.code = null; drop(); if (net.onLost) net.onLost();
+    }
+    ws.onmessage = function (ev) {
+      var d; try { d = JSON.parse(ev.data); } catch (e) { return; }
+      if (!d || typeof d !== 'object') return;
+      if (d.err) { finish(d.err); return; }
+      if (d.hello) {
+        live = true; net.code = code; net.status = 'online';
+        net.room = codeRoom(String(d.hello), others, function (pres) { if (ws.readyState === 1) { try { ws.send(JSON.stringify({ p: pres })); } catch (e) { /* one lost message is fine */ } } });
+        finish(null); return;
+      }
+      if (d.id && d.p && typeof d.p === 'object') others[d.id] = { p: frz(d.p), at: Date.now() };
+      else if (d.left) delete others[d.left];
+      else if (d.hostLeft) lost();
+    };
+    ws.onerror = function () { finish('load'); };
+    ws.onclose = function () { finish('load'); lost(); };
+  }
   // cb(error) or cb(null, code)
   net.hostGame = function (cb) {
-    loadPeer(function (err) {
-      if (err) return cb('load');
-      var code = '', abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-      for (var i = 0; i < 5; i++) code += abc[Math.floor(Math.random() * abc.length)];
-      var myId = 'tford-' + code, others = {}, conns = [], done = false, peer = new window.Peer(myId, iceOpts || {});
-      peer.on('open', function () {
-        done = true; net.code = code; net.status = 'online';
-        // the host passes everyone's position on to everyone else
-        net.room = codeRoom(myId, others, function (pres) {
-          var table = {}; table[myId] = pres; for (var k in others) table[k] = others[k].p;
-          for (var j = 0; j < conns.length; j++) if (conns[j].open) { try { conns[j].send({ all: table }); } catch (e) { /* one dropped message is fine */ } }
-        });
-        cb(null, code);
-      });
-      peer.on('connection', function (c) {
-        conns.push(c);
-        c.on('data', function (d) { if (d && d.p && typeof d.p === 'object') others[c.peer] = { p: frz(d.p), at: Date.now() }; });
-        c.on('close', function () { delete others[c.peer]; conns = conns.filter(function (x) { return x !== c; }); });
-      });
-      peer.on('error', function (e) { if (!done) { done = true; cb(e && e.type || 'error'); } });
-    });
+    var code = '', abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    for (var i = 0; i < 5; i++) code += abc[Math.floor(Math.random() * abc.length)];
+    relayRoom(code, true, function (err) { if (err) cb(err); else cb(null, code); });
   };
   // cb(error) or cb(null)
   net.joinGame = function (code, cb) {
     code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (code.length !== 5) return cb('code');
-    loadPeer(function (err) {
-      if (err) return cb('load');
-      var others = {}, done = false, peer = new window.Peer(iceOpts || {});
-      function finish(e) { if (!done) { done = true; cb(e); } }
-      var timer = setTimeout(function () { finish('timeout'); }, 25000); // going through the relay can take a little longer
-      peer.on('open', function (id) {
-        var c = peer.connect('tford-' + code);
-        c.on('open', function () {
-          clearTimeout(timer); net.code = code; net.status = 'online';
-          net.room = codeRoom(id, others, function (pres) { if (c.open) { try { c.send({ p: pres }); } catch (e) { /* fine */ } } });
-          finish(null);
-        });
-        c.on('data', function (d) {
-          if (!d || !d.all || typeof d.all !== 'object') return;
-          var seen = {}, k;
-          for (k in d.all) { if (k === id || !d.all[k] || typeof d.all[k] !== 'object') continue; others[k] = { p: frz(d.all[k]), at: Date.now() }; seen[k] = 1; }
-          for (k in others) if (!seen[k]) delete others[k];
-        });
-        c.on('close', function () { net.code = null; drop(); if (net.onLost) net.onLost(); });
-      });
-      peer.on('error', function (e) { clearTimeout(timer); finish(e && e.type || 'error'); });
-    });
+    relayRoom(code, false, cb);
   };
 
   // send my state; failures are normal (not connected yet, not allowed) and must never break the game
