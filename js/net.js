@@ -46,12 +46,25 @@
   net.canCode = !window.claude && !!window.RTCPeerConnection; // artifacts do not allow this kind of connection
   net.code = null;
   function frz(o) { return Object.freeze(JSON.parse(JSON.stringify(o))); }
-  function loadPeer(done) {
-    if (window.Peer) return done();
-    var s = document.createElement('script'); s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-    s.onload = function () { done(window.Peer ? null : 'load'); }; s.onerror = function () { done('load'); };
-    document.head.appendChild(s);
+  // Relay (TURN) servers from the website (functions/api/turn.js) for players whose routers block direct connections.
+  // If the site has none (a local test server, a plain file), PeerJS's own defaults are used.
+  var iceOpts = null;
+  function getIce(done) {
+    if (iceOpts !== null || location.protocol.indexOf('http') !== 0 || !window.fetch) return done();
+    var finished = false, t = setTimeout(function () { if (!finished) { finished = true; iceOpts = {}; done(); } }, 5000);
+    fetch('/api/turn', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      iceOpts = d && Array.isArray(d.iceServers) && d.iceServers.length ? { config: { iceServers: d.iceServers } } : {};
+    }).catch(function () { iceOpts = {}; }).then(function () { if (!finished) { finished = true; clearTimeout(t); done(); } });
   }
+  function loadPeer(done) {
+    getIce(function () {
+      if (window.Peer) return done();
+      var s = document.createElement('script'); s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
+      s.onload = function () { done(window.Peer ? null : 'load'); }; s.onerror = function () { done('load'); };
+      document.head.appendChild(s);
+    });
+  }
+  net.relay = function () { return !!(iceOpts && iceOpts.config); };
   function codeRoom(myId, others, sendOut) {
     var pres = {}, mine = frz({});
     return {
@@ -73,7 +86,7 @@
       if (err) return cb('load');
       var code = '', abc = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
       for (var i = 0; i < 5; i++) code += abc[Math.floor(Math.random() * abc.length)];
-      var myId = 'tford-' + code, others = {}, conns = [], done = false, peer = new window.Peer(myId);
+      var myId = 'tford-' + code, others = {}, conns = [], done = false, peer = new window.Peer(myId, iceOpts || {});
       peer.on('open', function () {
         done = true; net.code = code; net.status = 'online';
         // the host passes everyone's position on to everyone else
@@ -97,9 +110,9 @@
     if (code.length !== 5) return cb('code');
     loadPeer(function (err) {
       if (err) return cb('load');
-      var others = {}, done = false, peer = new window.Peer();
+      var others = {}, done = false, peer = new window.Peer(iceOpts || {});
       function finish(e) { if (!done) { done = true; cb(e); } }
-      var timer = setTimeout(function () { finish('timeout'); }, 15000);
+      var timer = setTimeout(function () { finish('timeout'); }, 25000); // going through the relay can take a little longer
       peer.on('open', function (id) {
         var c = peer.connect('tford-' + code);
         c.on('open', function () {
