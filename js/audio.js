@@ -2,7 +2,10 @@
 (function () {
   var TF = window.TF;
 
-  function Sound() { this.ctx = null; this.muted = false; }
+  function Sound() { this.ctx = null; this.muted = false; this.pulses = 2; this.profile = 'tford'; }
+
+  // 'tford': slow four-cylinder putt-putt and the "ahooga" horn. 'gt3': a faster, higher engine note and a plain two-tone horn.
+  Sound.prototype.setProfile = function (p) { this.profile = p === 'lmp1' ? 'gt3' : p; this.pulses = p === 'lmp1' ? 4 : p === 'gt3' ? 3 : 2; };
 
   // Browsers only allow sound after a key press or click, so this is called from the first input.
   Sound.prototype.start = function () {
@@ -33,12 +36,14 @@
     this.sqF = filter('bandpass', 1650, 18, gain(0.6, this.sqGain)); noise().connect(this.sqF);
     this.windGain = gain(0, master); noise().connect(filter('lowpass', 500, 0.5, this.windGain));
     this.scrGain = gain(0, master); noise().connect(filter('bandpass', 2400, 1.2, this.scrGain));
+    // boost: a rising turbo whine
+    this.turboGain = gain(0, master); this.turbo = c.createOscillator(); this.turbo.type = 'sine'; this.turbo.frequency.value = 1200; this.turbo.connect(this.turboGain); this.turbo.start();
   };
 
   // o: { rpm, thr (0..1), slide (0..1), speed (m/s), scrape (bool) }
   Sound.prototype.update = function (o) {
     if (!this.ctx) return;
-    var t = this.ctx.currentTime, f = o.rpm / 60 * 2;
+    var t = this.ctx.currentTime, f = o.rpm / 60 * this.pulses;
     this.osc1.frequency.setTargetAtTime(f, t, 0.06); this.osc2.frequency.setTargetAtTime(f / 2, t, 0.06);
     this.engLP.frequency.setTargetAtTime(220 + o.rpm * 0.35 + o.thr * 260, t, 0.08);
     this.engGain.gain.setTargetAtTime(0.16 + o.thr * 0.16, t, 0.08);
@@ -46,11 +51,12 @@
     this.sqF.frequency.setTargetAtTime(1500 + o.slide * 400, t, 0.1);
     this.windGain.gain.setTargetAtTime(Math.min(0.2, o.speed * o.speed / 400 * 0.16), t, 0.2);
     this.scrGain.gain.setTargetAtTime(o.scrape ? Math.min(0.3, 0.08 + o.speed * 0.012) : 0, t, 0.04);
+    this.turboGain.gain.setTargetAtTime(o.boost ? 0.05 : 0, t, 0.1); this.turbo.frequency.setTargetAtTime(1100 + o.speed * 12, t, 0.15);
   };
 
   Sound.prototype.silence = function () {
     if (!this.ctx) return; var t = this.ctx.currentTime;
-    [this.engGain, this.sqGain, this.windGain, this.scrGain].forEach(function (g) { g.gain.setTargetAtTime(0, t, 0.05); });
+    [this.engGain, this.sqGain, this.windGain, this.scrGain, this.turboGain].forEach(function (g) { g.gain.setTargetAtTime(0, t, 0.05); });
   };
 
   Sound.prototype.thump = function (v) {
@@ -65,6 +71,13 @@
   Sound.prototype.horn = function () {
     if (!this.ctx) return; var c = this.ctx, t = c.currentTime;
     if (this.hornUntil && t < this.hornUntil) return; this.hornUntil = t + 1.0;
+    if (this.profile === 'gt3') { // a short two-tone beep
+      var h1 = c.createOscillator(), h2 = c.createOscillator(), hg = c.createGain();
+      h1.type = 'square'; h2.type = 'square'; h1.frequency.value = 415; h2.frequency.value = 523;
+      hg.gain.setValueAtTime(0.0001, t); hg.gain.linearRampToValueAtTime(0.14, t + 0.02); hg.gain.setValueAtTime(0.14, t + 0.4); hg.gain.linearRampToValueAtTime(0.0001, t + 0.47);
+      h1.connect(hg); h2.connect(hg); hg.connect(this.master); h1.start(t); h2.start(t); h1.stop(t + 0.5); h2.stop(t + 0.5);
+      this.hornUntil = t + 0.5; return;
+    }
     var o = c.createOscillator(), o2 = c.createOscillator(), g = c.createGain(), bp = c.createBiquadFilter();
     o.type = 'sawtooth'; o2.type = 'square'; bp.type = 'bandpass'; bp.frequency.value = 900; bp.Q.value = 1.5;
     [o, o2].forEach(function (x, i) {

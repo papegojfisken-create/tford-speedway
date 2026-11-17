@@ -19,6 +19,10 @@
   </div>
   <div class="h-cam panel"><kbd>C</kbd><span id="hCam">CHASE CAM</span></div>
   <div class="h-net panel" id="hNet" hidden></div>
+  <div class="h-laps panel" id="hLaps"><span>LAP</span><b id="hLapNow">1</b><span id="hLapOf">/ 5</span></div>
+  <div class="h-gaps panel" id="hGaps"><div class="g-r" id="gAhead"><b>AHEAD</b><span>--</span><em></em></div><div class="g-r" id="gBehind"><b>BEHIND</b><span>--</span><em></em></div></div>
+  <div class="lb lb-all panel" id="lbAll" hidden></div>
+  <div class="lb lb-class panel" id="lbClass"></div>
   <div class="h-map panel">
     <svg viewBox="-185 -92 370 184" role="img" aria-label="Track map">
       <path id="mapTrack" fill="none" stroke="#fff8ea" stroke-width="11" stroke-linejoin="round" opacity=".85"/>
@@ -29,18 +33,43 @@
   </div>
   <div class="h-speed" id="speedo"></div>
   <div class="h-draft" id="hDraft">SLIPSTREAM</div>
+  <div class="h-boost" id="hBoost" hidden><span>BOOST</span><div class="bar"><i id="hBoostFill"></i></div></div>
 </div>
 <div id="toast" hidden></div>
 
 <!-- start screen -->
 <div id="menu" class="overlay">
-  <div class="title">T-Ford Speedway<small>FREE PRACTICE</small></div>
+  <button type="button" id="btnSettings" class="settings-btn" aria-haspopup="dialog">
+    <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/></svg>
+    Settings
+  </button>
+  <button type="button" id="btnLmp" class="lmp-btn" hidden>Switch to LMP1</button>
+  <div class="title">T-Ford Speedway<small id="menuSub">FREE PRACTICE</small></div>
   <div class="menu-bottom">
     <div class="swatches" id="menuSwatches" aria-label="Paint color"></div>
     <div class="ai-row">
+      <label for="carNum">Car number</label>
+      <input type="number" id="carNum" class="num-in" min="0" max="99" step="1" value="7" inputmode="numeric">
+    </div>
+    <div class="ai-row" id="rowFord">
       <label for="aiCount">AI drivers</label>
       <input type="range" id="aiCount" min="0" max="8" step="1" value="3">
       <b id="aiLabel">3</b>
+    </div>
+    <div class="ai-row" id="rowGt3" hidden>
+      <label for="aiGt3">AI GT3 cars</label>
+      <input type="range" id="aiGt3" min="0" max="20" step="1" value="8">
+      <b id="aiGt3Label">8</b>
+    </div>
+    <div class="ai-row" id="rowLmp" hidden>
+      <label for="aiLmp">AI LMP1 cars</label>
+      <input type="range" id="aiLmp" min="0" max="10" step="1" value="3">
+      <b id="aiLmpLabel">3</b>
+    </div>
+    <div class="ai-row" id="rowLaps">
+      <label for="raceLaps">Race laps</label>
+      <input type="range" id="raceLaps" min="1" max="50" step="1" value="5">
+      <b id="raceLapsLabel">5</b>
     </div>
     <div class="hint">← → paint color &nbsp;·&nbsp; ↑ ↓ AI drivers</div>
     <div class="online-row" id="onlineRow" hidden>
@@ -54,8 +83,9 @@
     <div class="legend">
       <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows: drive</span>
       <span><kbd>Space</kbd> handbrake</span>
-      <span><kbd>Shift</kbd> kick nearest car</span>
+      <span><kbd>Shift</kbd> <span class="shift-desc">kick nearest car</span></span>
       <span><kbd>C</kbd> camera</span>
+      <span><kbd>B</kbd> hold to look back</span>
       <span><kbd>H</kbd> horn</span>
       <span><kbd>G</kbd> ghost</span>
       <span><kbd>R</kbd> reset</span>
@@ -79,13 +109,33 @@
     <div class="legend">
       <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or arrows: drive</span>
       <span><kbd>Space</kbd> handbrake</span>
+      <span><kbd>Shift</kbd> <span class="shift-desc">kick nearest car</span></span>
       <span><kbd>C</kbd> camera</span>
+      <span><kbd>B</kbd> hold to look back</span>
       <span><kbd>H</kbd> horn</span>
       <span><kbd>G</kbd> ghost</span>
       <span><kbd>R</kbd> reset</span>
       <span><kbd>M</kbd> mute</span>
     </div>
   </div>
+</div>
+
+<!-- settings panel: opened from the start screen -->
+<div id="settings" class="side-panel" hidden role="dialog" aria-labelledby="setTitle">
+  <h2 id="setTitle">Settings</h2>
+  <div class="set-group" role="radiogroup" aria-label="Vehicle">
+    <div class="set-label">Vehicle</div>
+    <button type="button" class="veh" role="radio" aria-checked="true" data-veh="tford">
+      <b>Model T Ford</b>
+      <span>1915 runabout. Tops out around 100 km/h. Shift kicks the nearest car. Races on the classic speedway.</span>
+    </button>
+    <button type="button" class="veh" role="radio" aria-checked="false" data-veh="gt3">
+      <b>GT3 race car</b>
+      <span>Much more grip and a top speed near 200 km/h. Shift flashes the headlights. No kick. Races at Spa-Francorchamps. A button at the top left of the start screen turns it into an LMP1 prototype.</span>
+    </button>
+    <p class="set-note">Each vehicle has its own circuit, best lap and ghost.</p>
+  </div>
+  <div class="buttons"><button id="btnSetBack" type="button">Back (Esc)</button></div>
 </div>
 
 <div id="fatal" hidden></div>

@@ -57,6 +57,12 @@
     p.s.position.set(x, y, z); p.s.scale.setScalar(p.size); p.s.visible = true;
   };
 
+  // forget all skid marks and particles (the track has changed)
+  Effects.prototype.reset = function () {
+    this.head = 0; this.count = 0; this.last = [null, null, null, null]; this.lo = Infinity; this.hi = 0; this.geo.setDrawRange(0, 0);
+    for (var i = 0; i < this.parts.length; i++) { this.parts[i].life = 0; this.parts[i].s.visible = false; }
+  };
+
   Effects.prototype.update = function (dt) {
     // send only the new skid-mark segments to the graphics card, not the whole buffer
     if (this.hi > this.lo) { this.attr.updateRange.offset = this.lo; this.attr.updateRange.count = this.hi - this.lo; this.attr.needsUpdate = true; this.lo = Infinity; this.hi = 0; }

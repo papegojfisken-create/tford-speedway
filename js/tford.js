@@ -4,6 +4,7 @@
   var numTexes = {};
 
   // Replace the meshes that sit directly in a group with one mesh per material. Sub-groups are left alone.
+  TF.mergeGroup = function (grp) { mergeGroup(grp); };
   function mergeGroup(grp) {
     var by = new Map();
     grp.children.slice().forEach(function (m) {

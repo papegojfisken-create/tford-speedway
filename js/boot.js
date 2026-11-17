@@ -8,7 +8,7 @@
   function fatal(msg) { var f = document.getElementById('fatal'); f.textContent = msg; f.hidden = false; }
   window.TF = window.TF || {}; window.TF.fatal = fatal;
 
-  var files = ['js/track.js', 'js/physics.js', 'js/world.js', 'js/tford.js', 'js/effects.js', 'js/audio.js', 'js/net.js', 'js/game.js'];
+  var files = ['js/spadata.js', 'js/track.js', 'js/physics.js', 'js/world.js', 'js/tford.js', 'js/gt3.js', 'js/lmp1.js', 'js/effects.js', 'js/audio.js', 'js/net.js', 'js/game.js'];
   function next() { if (files.length) load(files.shift(), next); }
 
   load('js/lib/three.min.js', next, function () {
