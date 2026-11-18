@@ -165,7 +165,53 @@
     }
     return { nose: nose, tail: tail, roof: roof };
   }
-  // The livery, drawn per pixel by the graphics card (same colour rules as the prototype, see LIV in lmp1.js; the zones fit this body)
+  // The detailed livery (same designs as the prototypes, TF.LIV1 in lmp1.js), fitted to this body: Z holds the axles (FX, RX),
+  // wheel radii, the door centre (dx), the ends of the car and the roof height. Layers: lower colour under a line that climbs to the tail,
+  // the sweep with pinstripes, a diagonal slash behind the door, halftone dots over the rear quarter, hash marks behind the front wheel,
+  // centre stripes over bonnet, roof and boot lid, a sill line, panel seams, wing end plates and nose corners.
+  function gt3Detail(sp, Z) {
+    var v3 = TF.livV3, f = function (v) { return v.toFixed(3); };
+    return function (sh) {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\n#include <common>').replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vON = normal;');
+      var M = function (c, w) { return 'lc = mix(lc, ' + v3(c) + ', clamp(' + w + ', 0., 1.));'; };
+      var rq = Z.RX + Z.WRR, fq = Z.FX - Z.WR; // behind the rear wheel arch / ahead of it: the rear quarter starts at rq; the front wheel arch ends at fq
+      var L = ['#include <color_fragment>',
+        'vec3 P = vOP; vec3 Nn = normalize(vON); float az = abs(P.z); vec3 lc = diffuseColor.rgb;',
+        'float side = smoothstep(.2, .4, abs(Nn.z)); float up = smoothstep(.3, .45, Nn.y);',
+        'float flk = side * smoothstep(.78, .84, az) * bnd(P.x, ' + f(Z.tail + .08) + ', ' + f(Z.nose - .08) + ');',
+        'float ll = .27 + .08 * smoothstep(' + f(Z.FX) + ', ' + f(Z.RX) + ', P.x);',
+        'float tt = smoothstep(' + f(Z.FX) + ', ' + f(Z.RX - .3) + ', P.x); float s0 = ll + .02; float s1 = min(s0 + .05 + .11 * tt, .56);',
+        'float lower = flk * (1. - smoothstep(ll - .003, ll + .003, P.y)) + smoothstep(.5, .7, Nn.x) * (1. - smoothstep(.28, .3, P.y)) * step(' + f(Z.FX + .3) + ', P.x);'];
+      if (sp.lo != null) L.push(M(sp.lo, 'lower'));
+      if (sp.pin != null) L.push(M(sp.pin, 'flk * bnd(P.y, ll + .006, ll + .014)'));
+      var n = sp.sw.length;
+      sp.sw.forEach(function (c, k) { L.push(M(c, 'flk * bnd(P.y, s0 + (s1 - s0) * ' + f(k / n) + ', s0 + (s1 - s0) * ' + f((k + 1) / n) + ')')); });
+      if (sp.pin2 != null) L.push(M(sp.pin2, 'flk * bnd(P.y, s1 + .012, s1 + .02)'));
+      var x0 = rq + .5;
+      L.push('float su = P.x + 1.5 * (P.y - .3); float sz = flk * step(s1, P.y) * (1. - smoothstep(.76, .78, P.y)) * bnd(P.x, ' + f(rq) + ', ' + f(Z.dx - .45) + ');',
+        M(sp.sw[n - 1], 'sz * bnd(su, ' + f(x0 - .07) + ', ' + f(x0 + .05) + ')'), M(sp.pin2 != null ? sp.pin2 : sp.sw[0], 'sz * bnd(su, ' + f(x0 + .1) + ', ' + f(x0 + .125) + ')'));
+      if (sp.dots != null) L.push(
+        'vec2 dg = vec2(P.x, P.y) / .042; dg.x += .5 * mod(floor(dg.y), 2.); vec2 dc = fract(dg) - .5;',
+        'float dr = .5 * smoothstep(' + f(x0 - .1) + ', ' + f(Z.tail + .2) + ', P.x) * (1. - clamp((P.y - s1 - .03) / .16, 0., 1.));',
+        M(sp.dots, 'flk * bnd(P.y, s1 + .03, s1 + .2) * (1. - smoothstep(dr - .07, dr + .07, length(dc))) * step(.06, dr)'));
+      if (sp.hash != null) L.push(M(sp.hash, 'flk * bnd(P.x, ' + f(fq - .5) + ', ' + f(fq - .08) + ') * bnd(P.y, s1 + .03, s1 + .09) * step(fract((P.x + P.y * .8) / .05), .42)'));
+      L.push('float ctr = up * bnd(P.x, ' + f(Z.tail + .05) + ', ' + f(Z.nose - .05) + ');');
+      if (sp.c) L.push(M(sp.c[1], 'ctr * (1. - smoothstep(.115, .122, az))'), M(sp.c[0], 'ctr * (1. - smoothstep(.06, .066, az))'));
+      if (sp.cpin != null) L.push(M(sp.cpin, 'ctr * (bnd(az, .132, .14) + bnd(az, .074, .08))'));
+      if (sp.sill != null) L.push(M(sp.sill, 'flk * bnd(P.y, ll - .06, ll - .045)'));
+      L.push(M(0x111112, '.55 * flk * (bnd(P.x, ' + f(fq - .62) + ', ' + f(fq - .613) + ') + bnd(P.x, ' + f(Z.dx - .62) + ', ' + f(Z.dx - .613) + ')) * bnd(P.y, ll + .02, .8)')); // door shut lines
+      L.push('float plate = bnd(P.x, ' + f(Z.tail - .1) + ', ' + f(Z.tail + .6) + ') * smoothstep(.83, .88, az) * smoothstep(.65, .7, P.y); float plow = 1. - smoothstep(' + f(Z.roofY - .2) + ', ' + f(Z.roofY - .16) + ', P.y);');
+      if (sp.pl) L.push(M(sp.pl[0], 'plate * plow'), M(sp.pl[1], 'plate * (1. - plow)'));
+      if (sp.fr != null) L.push(M(sp.fr, 'smoothstep(' + f(Z.nose - .25) + ', ' + f(Z.nose - .2) + ', P.x) * smoothstep(.55, .6, az) * (1. - smoothstep(.5, .56, P.y))'));
+      L.push('sm = min(1., dot(abs(lc - diffuseColor.rgb), vec3(1.)) * 4.); diffuseColor.rgb = lc;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\nfloat sm;\nfloat bnd(float v, float a, float b) { float e = .004; return smoothstep(a - e, a + e, v) * (1. - smoothstep(b - e, b + e, v)); }\n#include <common>')
+        .replace('#include <color_fragment>', L.join('\n'))
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, .55, sm);')
+        .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor *= (1. - sm);')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= (1. - sm);');
+    };
+  }
+  // The older, simpler livery (same colour rules as the prototype's TF.LIV; the zones fit this body)
   function gt3Livery(sp, Z) {
     var v3 = TF.livV3, f = function (v) { return v.toFixed(3); };
     return function (sh) {
@@ -423,8 +469,10 @@
       if (paint.emissive) paint.emissive.setHex(brand === 'porsche' ? 0x1a1a1c : 0x000000);
       if (brand !== 'porsche') { paint.metalness = .1; paint.envMapIntensity = .4; }
       if (brand === 'ferrari') { paint.color.setHex(0xd00000); paint.emissive.setHex(0x1e0000); paint.metalness = 0; paint.roughness = .38; paint.envMapIntensity = .22; }
-      paint.customProgramCacheKey = function () { return 'gt3' + brand; };
-      paint.onBeforeCompile = gt3Livery(LV, Z);
+      var L1 = TF.LIV1 && TF.LIV1[brand];
+      Z.FX = FX; Z.RX = RX; Z.WR = WR; Z.WRR = WRR; Z.dx = (RX + FX) / 2 + .35;
+      paint.customProgramCacheKey = function () { return 'gt3v2' + brand; };
+      paint.onBeforeCompile = L1 ? gt3Detail(L1, Z) : gt3Livery(LV, Z);
       paint.side = T.DoubleSide; // fills the small openings in the shell with the panel behind
       var roleMat = { paint: paint, black: carbon, glass: glass, light: lamp, tail: tail, floor: trim };
       Object.keys(PG).forEach(function (k) {
@@ -439,6 +487,11 @@
         var e1 = flankEdge(md, [nx - .15, nx + .15, .35, .6], s), e2 = flankEdge(md, [dx - .25, dx + .25, .5, .7], s);
         if (e1) { var r = new T.Mesh(new T.CircleGeometry(.17, 28), rdM); r.position.set(nx, .48, s * (e1 + .006)); if (s < 0) r.rotation.y = Math.PI; g.add(r); }
         if (e2) { var w = new T.Mesh(new T.PlaneGeometry(LV.ws[0], LV.ws[1]), wmM); w.position.set(dx, .6, s * (e2 + .006)); if (s < 0) w.rotation.y = Math.PI; g.add(w); }
+        if (L1) { // the small flag behind the front wheel and a line of lettering low on the door
+          var fxg = FX - WR - .3, e4 = flankEdge(md, [fxg - .1, fxg + .1, .62, .74], s), e5 = flankEdge(md, [dx - .35, dx + .35, .22, .32], s);
+          if (e4) { var fl = new T.Mesh(new T.PlaneGeometry(.15, .1), std({ map: TF.livFlag(L1.flag), roughness: .6, polygonOffset: true, polygonOffsetFactor: -2 })); fl.position.set(fxg, .68, s * (e4 + .006)); if (s < 0) fl.rotation.y = Math.PI; g.add(fl); }
+          if (e5) { var tg = new T.Mesh(new T.PlaneGeometry(.78, .065), std({ map: TF.livTag(L1.tag, 'GT3 CUP · T-FORD RACING · TURBO OIL'), transparent: true, roughness: .6, polygonOffset: true, polygonOffsetFactor: -2 })); tg.position.set(dx, .25, s * (e5 + .006)); if (s < 0) tg.rotation.y = Math.PI; g.add(tg); }
+        }
       });
       var emM = std({ map: LV.emb(), transparent: true, roughness: .5, polygonOffset: true, polygonOffsetFactor: -2 });
       var ex = FX + .45, em = new T.Mesh(new T.PlaneGeometry(LV.es[0], LV.es[1]).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), emM); em.position.set(ex, topNear(md, [ex - .05, ex + .05], .12) + .006, 0); g.add(em);

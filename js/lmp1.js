@@ -96,6 +96,89 @@
         .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= (1. - sm);');
     };
   }
+  // ---- the detailed prototype liveries (the GT3 bodies keep TF.LIV above) ----
+  // Everything is drawn per pixel in the body's own coordinates (x forward, y up, z sideways), in layers:
+  // lo = lower body colour under a line that climbs towards the tail; sw = the sweep above it (1 to 3 colours stacked);
+  // pin / pin2 = pinstripes under and over the sweep; dots = a halftone dot fade over the rear flank; hash = slanted marks
+  // on the sidepod; c = centre stripes nose-roof-fin [inner, outer] with cpin outlines; fin + chev = tail fin colour and its
+  // chevrons; fen = twin pinstripes along the front fenders; sill = the thin line along the bottom; pl = wing end plates [low, high];
+  // fr = nose corners. flag = the small flag by the cockpit; tag = the colour of the small lettering.
+  var LIV1 = {
+    porsche: { lo: 0x0b0b0c, sw: [0xf0001e], pin: 0x0b0b0c, pin2: 0xf0001e, dots: 0xf0001e, hash: 0x0b0b0c, c: [0x0b0b0c, 0xf0001e], cpin: 0x0b0b0c, fin: 0x0b0b0c, chev: 0xf0001e, fen: 0xf0001e, sill: 0xf0001e, pl: [0x0b0b0c, 0xf0001e], fr: 0xf0001e, flag: 'de', tag: '#f4f4f2' },
+    ferrari: { lo: 0x0b0b0c, sw: [0x009246, 0xf4f4f2, 0xce2b37], pin: 0xffd400, pin2: 0xffd400, dots: 0xffd400, hash: 0xf4f4f2, c: [0xf4f4f2, 0x009246], cpin: 0xffd400, fin: 0x0b0b0c, chev: 0xffd400, fen: 0xffd400, sill: 0xffd400, pl: [0x0b0b0c, 0xffd400], fr: 0xffd400, flag: 'it', tag: '#ffd400' },
+    audi: { lo: 0xb9bcc2, sw: [0xd0021b], pin: 0xd0021b, pin2: 0xb9bcc2, dots: 0xd0021b, hash: 0xb9bcc2, c: [0xd0021b, 0xb9bcc2], cpin: 0xd0021b, fin: 0xd0021b, chev: 0xf4f4f2, fen: 0xd0021b, sill: 0xd0021b, pl: [0xb9bcc2, 0xd0021b], fr: 0xd0021b, flag: 'de', tag: '#111112' },
+    bmw: { lo: 0x0b0b0c, sw: [0xe4002b, 0x16288f, 0x81c4ff], pin: 0xf4f4f2, pin2: 0x81c4ff, dots: 0x81c4ff, hash: 0xf4f4f2, c: [0xe4002b, 0x81c4ff], cpin: 0xf4f4f2, fin: 0x0b0b0c, chev: 0x81c4ff, fen: 0x81c4ff, sill: 0xe4002b, pl: [0x0b0b0c, 0x81c4ff], fr: 0xe4002b, flag: 'de', tag: '#f4f4f2' },
+    mclaren: { lo: 0x1d2026, sw: [0x1d2026, 0xf4f4f2], pin: 0x47c7fc, pin2: 0x47c7fc, dots: 0x1d2026, hash: 0xf4f4f2, c: [0x1d2026, 0xf4f4f2], cpin: 0x47c7fc, fin: 0x1d2026, chev: 0xff8000, fen: 0x47c7fc, sill: 0x47c7fc, pl: [0x1d2026, 0x47c7fc], fr: 0x1d2026, flag: 'gb', tag: '#47c7fc' },
+    aston: { lo: 0x0b0b0c, sw: [0xb8e600], pin: 0xb8e600, pin2: 0xf4f4f2, dots: 0xb8e600, hash: 0xb8e600, c: [0xb8e600, 0x0b0b0c], cpin: 0xf4f4f2, fin: 0x0b0b0c, chev: 0xb8e600, fen: 0xb8e600, sill: 0xb8e600, pl: [0x0b0b0c, 0xb8e600], fr: 0xb8e600, flag: 'gb', tag: '#b8e600' }
+  };
+  function lmpLivery(sp) {
+    return function (sh) {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\n#include <common>').replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vON = normal;');
+      var M = function (c, w) { return 'lc = mix(lc, ' + v3(c) + ', clamp(' + w + ', 0., 1.));'; };
+      var L = ['#include <color_fragment>',
+        'vec3 P = vOP; vec3 Nn = normalize(vON); float az = abs(P.z); vec3 lc = diffuseColor.rgb;',
+        'float side = smoothstep(.35, .6, abs(Nn.z)); float up = smoothstep(.25, .45, Nn.y);',
+        'float flk = side * smoothstep(.3, .36, az) * bnd(P.x, -2.45, 2.45);',                               // the outer body sides
+        'float finS = side * (1. - smoothstep(.1, .13, az)) * smoothstep(.62, .66, P.y) * bnd(P.x, -2.5, -.9);', // the tail fin's sides
+        'float ll = .3 + .11 * smoothstep(1.6, -2.2, P.x);',                                                    // the low line, climbing to the tail
+        'float tt = smoothstep(.6, -2.3, P.x); float s0 = ll + .022; float s1 = s0 + .06 + .2 * tt;',        // the sweep, widening at the rear
+        'float lower = flk * (1. - smoothstep(ll - .003, ll + .003, P.y)) + smoothstep(.5, .7, Nn.x) * (1. - smoothstep(.27, .29, P.y)) * step(1.9, P.x);'];
+      if (sp.lo != null) L.push(M(sp.lo, 'lower'));
+      if (sp.pin != null) L.push(M(sp.pin, 'flk * bnd(P.y, ll + .006, ll + .014)'));
+      var n = sp.sw.length;
+      sp.sw.forEach(function (c, k) { L.push(M(c, 'flk * bnd(P.y, s0 + (s1 - s0) * ' + (k / n).toFixed(3) + ', s0 + (s1 - s0) * ' + ((k + 1) / n).toFixed(3) + ')')); });
+      if (sp.pin2 != null) L.push(M(sp.pin2, 'flk * bnd(P.y, s1 + .012, s1 + .02)'));
+      // a bold diagonal slash rising towards the tail just behind the cockpit, with a thin twin
+      L.push('float su = P.x + 1.6 * (P.y - .3); float sz = flk * step(s1, P.y) * (1. - smoothstep(.74, .76, P.y)) * bnd(P.x, -1.25, .2);',
+        M(sp.sw[n - 1], 'sz * bnd(su, -.38, -.26)'), M(sp.pin2 != null ? sp.pin2 : sp.sw[0], 'sz * bnd(su, -.22, -.195)'));
+      if (sp.dots != null) L.push( // halftone dots: bigger towards the tail and towards the sweep, staggered rows
+        'vec2 dg = vec2(P.x, P.y) / .045; dg.x += .5 * mod(floor(dg.y), 2.); vec2 dc = fract(dg) - .5;',
+        'float dr = .5 * smoothstep(.35, -2.1, P.x) * (1. - clamp((P.y - s1 - .035) / .17, 0., 1.));',
+        M(sp.dots, 'flk * bnd(P.y, s1 + .035, s1 + .21) * (1. - smoothstep(dr - .07, dr + .07, length(dc))) * step(.06, dr)'));
+      if (sp.hash != null) L.push(M(sp.hash, 'flk * bnd(P.x, .45, 1.05) * bnd(P.y, s1 + .03, s1 + .095) * step(fract((P.x + P.y * .8) / .055), .42)'));
+      // centre stripes from the nose over the roof and the engine cover to the top of the fin, outlined by pinstripes
+      L.push('float ctr = up * bnd(P.x, -2.45, 2.45);');
+      if (sp.c) { L.push(M(sp.c[1], 'ctr * (1. - smoothstep(.115, .122, az))'), M(sp.c[0], 'ctr * (1. - smoothstep(.06, .066, az))')); }
+      if (sp.cpin != null) L.push(M(sp.cpin, 'ctr * (bnd(az, .132, .14) + bnd(az, .074, .08))'));
+      if (sp.fin != null) L.push(M(sp.fin, 'finS * (1. - smoothstep(-2.17, -2.15, P.x))')); // the fin's trailing edge (the name sits in front of it)
+      if (sp.chev != null) L.push(M(sp.chev, 'finS * bnd(P.x, -2.1, -1.1) * bnd(P.y, .7, .84) * step(fract((P.x + abs(P.y - .77) * 1.4) / .1), .45)')); // a row of forward-pointing chevrons under the name
+      if (sp.fen != null) L.push(M(sp.fen, 'up * bnd(P.x, 1.0, 2.35) * (bnd(az, .78, .792) + bnd(az, .812, .824))'));
+      if (sp.sill != null) L.push(M(sp.sill, 'flk * bnd(P.y, .175, .19)'));
+      L.push(M(0x111112, '.6 * flk * (bnd(P.x, .42, .428) + bnd(P.x, -.9, -.892)) * bnd(P.y, ll + .02, .95)')); // door and panel seams
+      L.push('float plate = bnd(P.x, -3., -1.7) * smoothstep(.83, .87, az); float plow = 1. - smoothstep(.79, .81, P.y);');
+      if (sp.pl) L.push(M(sp.pl[0], 'plate * plow'), M(sp.pl[1], 'plate * (1. - plow)'), M(sp.pin2 != null ? sp.pin2 : sp.pl[1], 'plate * bnd(P.y, .66, .675)'));
+      if (sp.fr != null) L.push(M(sp.fr, 'smoothstep(2.24, 2.26, P.x) * smoothstep(.77, .79, az)'));
+      L.push('sm = min(1., dot(abs(lc - diffuseColor.rgb), vec3(1.)) * 4.); diffuseColor.rgb = lc;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\nfloat sm;\nfloat bnd(float v, float a, float b) { float e = .004; return smoothstep(a - e, a + e, v) * (1. - smoothstep(b - e, b + e, v)); }\n#include <common>')
+        .replace('#include <color_fragment>', L.join('\n'))
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, .55, sm);')
+        .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor *= (1. - sm);')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= (1. - sm);');
+    };
+  }
+  // small decals: the flag by the cockpit and a line of lettering on the sidepod
+  var smallTex = {};
+  function flagTex(f) {
+    return smallTex['f' + f] || (smallTex['f' + f] = TF.canvasTex(96, 64, function (x) {
+      var cols = f === 'it' ? ['#009246', '#f4f4f2', '#ce2b37'] : f === 'de' ? ['#111', '#dd0000', '#ffce00'] : null;
+      if (cols && f === 'it') cols.forEach(function (c, i) { x.fillStyle = c; x.fillRect(i * 32, 0, 32, 64); });
+      else if (cols) cols.forEach(function (c, i) { x.fillStyle = c; x.fillRect(0, i * 21.34, 96, 21.34); });
+      else { // a simple Union flag
+        x.fillStyle = '#012169'; x.fillRect(0, 0, 96, 64); x.strokeStyle = '#fff'; x.lineWidth = 13; x.beginPath(); x.moveTo(0, 0); x.lineTo(96, 64); x.moveTo(96, 0); x.lineTo(0, 64); x.stroke();
+        x.strokeStyle = '#c8102e'; x.lineWidth = 5; x.stroke(); x.fillStyle = '#fff'; x.fillRect(38, 0, 20, 64); x.fillRect(0, 22, 96, 20); x.fillStyle = '#c8102e'; x.fillRect(42, 0, 12, 64); x.fillRect(0, 26, 96, 12);
+      }
+      x.strokeStyle = 'rgba(0,0,0,.5)'; x.lineWidth = 2; x.strokeRect(1, 1, 94, 62);
+    }));
+  }
+  function tagTex(c, words) {
+    var key = 't' + c + words;
+    return smallTex[key] || (smallTex[key] = TF.canvasTex(768, 64, function (x) {
+      x.fillStyle = c; x.font = 'italic bold 36px Arial,sans-serif'; x.textBaseline = 'middle'; x.fillText(words, 6, 34, 756);
+    }));
+  }
+
+  TF.LIV1 = LIV1; TF.livFlag = flagTex; TF.livTag = tagTex; // the GT3 bodies use the same designs, fitted to their own shapes
+
   // the outermost point of the body in a box: where to stick a decal
   function bodyEdge(box, sign) {
     var G = TF.P963.geos.paint, P = G.attributes.position.array, best = null;
@@ -373,8 +456,9 @@
       if (paint.emissive) paint.emissive.setHex(brand === 'porsche' ? 0x1a1a1c : 0x000000); // a little self-light so white stays white in shade
       if (brand !== 'porsche') { paint.metalness = .1; paint.envMapIntensity = .4; } // coloured paints: less shine, so they do not look washed out
       if (brand === 'ferrari') { paint.color.setHex(0xd00000); paint.emissive.setHex(0x1e0000); paint.metalness = 0; paint.roughness = .38; paint.envMapIntensity = .22; } // Rosso Corsa: a deep, strong red instead of a pinkish one
-      paint.customProgramCacheKey = function () { return 'p963' + brand; };
-      paint.onBeforeCompile = liveryShader(LV);
+      var L1 = LIV1[brand];
+      paint.customProgramCacheKey = function () { return 'p963v2' + brand; };
+      paint.onBeforeCompile = lmpLivery(L1);
       paint.side = T.DoubleSide; // the shell has small gaps and openings: this fills them with the white of the panel behind instead of showing the dark inside
       var PG = p963Geos(), roleMat = { paint: paint, black: paint, glass: glass, light: led, tail: tail, red: accent, floor: M({ color: 0xdcdcde, roughness: .5 }) };
       Object.keys(PG).forEach(function (k) {
@@ -388,6 +472,10 @@
       [-1, 1].forEach(function (s) {
         var e1 = bodyEdge([-1.05, -.75, .35, .55], s);
         if (e1) { var r = new T.Mesh(new T.CircleGeometry(.17, 28), rdM); r.position.set(-.92, .45, s * (e1 + .006)); if (s < 0) r.rotation.y = Math.PI; g.add(r); }
+        var e2 = bodyEdge([.45, .75, .55, .7], s); // the flag, just ahead of the cockpit
+        if (e2) { var fl = new T.Mesh(new T.PlaneGeometry(.15, .1), std({ map: flagTex(L1.flag), roughness: .6, polygonOffset: true, polygonOffsetFactor: -2 })); fl.position.set(.6, .62, s * (e2 + .006)); if (s < 0) fl.rotation.y = Math.PI; g.add(fl); }
+        var e3 = bodyEdge([-.4, .2, .25, .4], s); // a line of small lettering low on the sidepod
+        if (e3) { var tg = new T.Mesh(new T.PlaneGeometry(.78, .065), std({ map: tagTex(L1.tag, 'HYBRID · T-FORD RACING · TURBO OIL'), transparent: true, roughness: .6, polygonOffset: true, polygonOffsetFactor: -2 })); tg.position.set(-.1, .27, s * (e3 + .006)); if (s < 0) tg.rotation.y = Math.PI; g.add(tg); }
         if (fin.top > .7) { var w = new T.Mesh(new T.PlaneGeometry(LV.ws[0] * 1.15, LV.ws[1] * 1.15), wmM); w.position.set(-1.65, fin.top - .14, s * (fin.hw + .005)); w.rotation.z = -.14 * s; if (s < 0) w.rotation.y = Math.PI; g.add(w); }
       });
       var emM = std({ map: LV.emb(), transparent: true, roughness: .5, polygonOffset: true, polygonOffsetFactor: -2 });

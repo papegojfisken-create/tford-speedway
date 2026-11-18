@@ -815,7 +815,7 @@
     if (closing) { TF.account.raceBeacon(res); return; }
     TF.account.race(res).then(function (r) {
       if (!r) return;
-      var txt = CLASS_NAME[r.veh] + ' rating ' + Math.round(r.r) + ' (' + (r.d >= 0 ? '+' : '−') + Math.abs(r.d).toFixed(1) + ')';
+      var txt = CLASS_NAME[r.veh] + ' rating ' + Math.round(r.r) + ' (' + (r.d >= 0 ? '+' : '−') + Math.abs(r.d).toFixed(1) + ')' + (r.title ? ' · New title: ' + r.title : '');
       if (finished && state === 'drive') { toastEl.textContent += ' · ' + txt; toastT = Math.max(toastT, 3); } else toast(txt, r.d >= 0 ? 'best' : '');
     });
   }

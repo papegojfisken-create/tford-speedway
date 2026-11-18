@@ -46,13 +46,19 @@
   }
   // ---- driver rating (one per class) ----
   var elo = null, ELO_NAMES = { tford: 'Model T', gt3: 'GT3', lmp1: 'LMP1' };
+  // a title for every rating level: the ones under 800 are jokes, from 800 up you earn your way to Immortal
+  var TITLES = [[0, 'Lawn Mower Pilot'], [300, 'Gravel Trap Tourist'], [450, 'Professional Spinner'], [600, 'Tyre Wall Inspector'], [700, 'Sunday Driver'],
+    [800, 'Rookie'], [900, 'Club Racer'], [1000, 'Racer'], [1100, 'Contender'], [1200, 'Podium Hunter'], [1300, 'Pro'], [1400, 'Ace'],
+    [1500, 'Champion'], [1650, 'Legend'], [1800, 'Hall of Famer'], [2000, 'Immortal']];
+  function titleFor(r) { var t = TITLES[0][1]; for (var i = 0; i < TITLES.length; i++) if (r >= TITLES[i][0]) t = TITLES[i][1]; return t; }
+  TF.titleFor = titleFor;
   function drawElo() {
     var box = $('acElo'); if (!box) return;
     box.textContent = '';
     ['tford', 'gt3', 'lmp1'].forEach(function (c) {
-      var d = document.createElement('div'), a = document.createElement('span'), b = document.createElement('b');
-      a.textContent = ELO_NAMES[c]; b.textContent = elo ? String(Math.round(elo[c])) : '…';
-      d.appendChild(a); d.appendChild(b); box.appendChild(d);
+      var d = document.createElement('div'), a = document.createElement('span'), b = document.createElement('b'), t = document.createElement('em');
+      a.textContent = ELO_NAMES[c]; b.textContent = elo ? String(Math.round(elo[c])) : '…'; t.textContent = elo ? titleFor(elo[c]) : '';
+      d.appendChild(a); d.appendChild(b); d.appendChild(t); box.appendChild(d);
     });
   }
   function loadElo() {
@@ -64,6 +70,8 @@
     if (!auth) return Promise.resolve(null);
     return api('/auth/race', 'POST', res).then(function (r) {
       if (!r.ok) return null;
+      var before = r.r - r.d;
+      if (titleFor(before) !== titleFor(r.r)) r.title = titleFor(r.r); // reached (or dropped to) a new title
       if (elo) elo[r.veh] = r.r; else loadElo();
       drawElo(); return r;
     });
@@ -148,6 +156,7 @@
       var d = document.createElement('div'); d.className = 'lb-row' + (me && r.n.toLowerCase() === me ? ' me' : '');
       var a = document.createElement('span'); a.textContent = (i + 1) + '.';
       var b = document.createElement('b'); b.textContent = r.n;
+      if (lbKind === 'elo') { var tl = document.createElement('small'); tl.textContent = titleFor(r.r); b.appendChild(tl); }
       var c = document.createElement('em'); c.textContent = lbKind === 'elo' ? String(r.r) : fmtT(r.t);
       d.appendChild(a); d.appendChild(b); d.appendChild(c); box.appendChild(d);
     });
