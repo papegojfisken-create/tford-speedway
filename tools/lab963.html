@@ -1,0 +1,157 @@
+<!doctype html>
+<meta charset="utf-8"><title>Porsche 963 lab</title>
+<style>html,body{margin:0;background:#1b1d22;color:#ddd;font:12px monospace}canvas{display:block}</style>
+<canvas id="c" width="900" height="560"></canvas>
+<script src="../js/lib/three.min.js"></script>
+<script>
+// Lab for turning the downloaded glTF (916k triangles) into a small game model.
+var T = THREE, lab = window.lab = {};
+var renderer = new T.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+renderer.setSize(900, 560, false); renderer.setClearColor(0x2a2d34);
+var scene = new T.Scene(), cam = new T.PerspectiveCamera(40, 900 / 560, .1, 100);
+scene.add(new T.HemisphereLight(0xffffff, 0x404048, .9)); var dl = new T.DirectionalLight(0xffffff, .8); dl.position.set(3, 6, 4); scene.add(dl);
+var root = new T.Group(); scene.add(root);
+var gltf, bin, prims = lab.prims = []; // prims: {mesh, name, mat, matIdx, pos(Float32Array world), nor, idx, tris}
+
+function comp(ct) { return ct === 5126 ? Float32Array : ct === 5123 ? Uint16Array : ct === 5125 ? Uint32Array : ct === 5121 ? Uint8Array : Int16Array; }
+function readAcc(i) {
+  var a = gltf.accessors[i], bv = gltf.bufferViews[a.bufferView], C = comp(a.componentType), n = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[a.type];
+  var off = (bv.byteOffset || 0) + (a.byteOffset || 0), stride = bv.byteStride || n * C.BYTES_PER_ELEMENT, out = new C(a.count * n);
+  if (stride === n * C.BYTES_PER_ELEMENT) { return new C(bin, off, a.count * n).slice(); }
+  var dv = new DataView(bin); for (var k = 0; k < a.count; k++) for (var c = 0; c < n; c++) { var o = off + k * stride + c * C.BYTES_PER_ELEMENT; out[k * n + c] = C === Float32Array ? dv.getFloat32(o, true) : C === Uint16Array ? dv.getUint16(o, true) : C === Uint32Array ? dv.getUint32(o, true) : dv.getUint8(o); }
+  return out;
+}
+lab.load = async function () {
+  gltf = await (await fetch('../models/porsche963/scene.gltf')).json();
+  bin = await (await fetch('../models/porsche963/scene.bin')).arrayBuffer();
+  var m4 = new T.Matrix4(), cache = {};
+  function visit(ni, parent) {
+    var nd = gltf.nodes[ni], local = new T.Matrix4();
+    if (nd.matrix) local.fromArray(nd.matrix); else local.compose(new T.Vector3().fromArray(nd.translation || [0, 0, 0]), new T.Quaternion().fromArray(nd.rotation || [0, 0, 0, 1]), new T.Vector3().fromArray(nd.scale || [1, 1, 1]));
+    var world = new T.Matrix4().multiplyMatrices(parent, local);
+    if (nd.mesh != null) {
+      gltf.meshes[nd.mesh].primitives.forEach(function (p, pi) {
+        var pos = readAcc(p.attributes.POSITION), nor = p.attributes.NORMAL != null ? readAcc(p.attributes.NORMAL) : null, idx = p.indices != null ? readAcc(p.indices) : null;
+        var nm = new T.Matrix3().getNormalMatrix(world), v = new T.Vector3();
+        for (var i = 0; i < pos.length; i += 3) { v.set(pos[i], pos[i + 1], pos[i + 2]).applyMatrix4(world); pos[i] = v.x; pos[i + 1] = v.y; pos[i + 2] = v.z; if (nor) { v.set(nor[i], nor[i + 1], nor[i + 2]).applyMatrix3(nm).normalize(); nor[i] = v.x; nor[i + 1] = v.y; nor[i + 2] = v.z; } }
+        var mat = gltf.materials[p.material] || {};
+        prims.push({ id: prims.length, node: ni, nodeName: nd.name, mesh: nd.mesh, meshName: gltf.meshes[nd.mesh].name, mat: mat.name, matIdx: p.material, color: (mat.pbrMetallicRoughness && mat.pbrMetallicRoughness.baseColorFactor) || null, textured: !!(mat.pbrMetallicRoughness && mat.pbrMetallicRoughness.baseColorTexture), pos: pos, nor: nor, idx: idx, tris: (idx ? idx.length : pos.length / 3) / 3 });
+      });
+    }
+    (nd.children || []).forEach(function (c) { visit(c, world); });
+  }
+  gltf.scenes[gltf.scene || 0].nodes.forEach(function (n) { visit(n, new T.Matrix4()); });
+  var bb = new T.Box3(); prims.forEach(function (p) { for (var i = 0; i < p.pos.length; i += 3) bb.expandByPoint(new T.Vector3(p.pos[i], p.pos[i + 1], p.pos[i + 2])); });
+  lab.bbox = [bb.min.toArray(), bb.max.toArray()];
+  return prims.length + ' primitives, bbox ' + JSON.stringify(lab.bbox.map(function (a) { return a.map(function (x) { return +x.toFixed(2); }); }));
+};
+lab.list = function (min) { return prims.filter(function (p) { return p.tris >= (min || 0); }).map(function (p) { return p.id + ':' + p.meshName + '/' + p.mat + ' ' + p.tris + (p.textured ? 'T' : '') + ' ' + (p.color || []).map(function (x) { return +x.toFixed(2); }).join(','); }); };
+lab.bounds = function (p) { var b = new T.Box3(); for (var i = 0; i < p.pos.length; i += 3) b.expandByPoint(new T.Vector3(p.pos[i], p.pos[i + 1], p.pos[i + 2])); return b.min.toArray().map(function (x) { return +x.toFixed(2); }).concat(b.max.toArray().map(function (x) { return +x.toFixed(2); })); };
+// draw the chosen primitives (filter gets the prim), each in a colour picked from its id so parts can be told apart
+lab.show = function (filter, mode) {
+  while (root.children.length) { var o = root.children.pop(); o.geometry.dispose(); }
+  prims.forEach(function (p) {
+    if (filter && !filter(p)) return;
+    var g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(p.pos, 3)); if (p.nor) g.setAttribute('normal', new T.BufferAttribute(p.nor, 3)); else g.computeVertexNormals();
+    if (p.idx) g.setIndex(new T.BufferAttribute(p.idx, 1));
+    var col = mode === 'id' ? new T.Color().setHSL((p.id * 0.61803) % 1, .7, .55) : new T.Color(0xcccccc);
+    root.add(new T.Mesh(g, new T.MeshStandardMaterial({ color: col, side: T.DoubleSide, roughness: .6 })));
+  });
+  return root.children.length;
+};
+// ---- reducing the model: vertex clustering with a best-fit (quadric) position per cluster, which keeps flat panels and edges sharp ----
+// model space: nose at +z, +y up, x sideways. Game space: nose at +x, -z = left. Shifted so the wheels sit on y = 0 and the axles sit where the game's wheels are.
+function toGame(x, y, z, o, k) { o[k] = z + 0.195; o[k + 1] = y + 0.05; o[k + 2] = -x; }
+lab.bake = function (list, cell) {
+  var cl = new Map(), cp = [], vmap = [], tris = [];
+  // 1. clusters
+  list.forEach(function (p) {
+    var vc = new Int32Array(p.pos.length / 3), P = new Float32Array(3), n = p.idx ? p.idx.length : p.pos.length / 3;
+    for (var i = 0; i < vc.length; i++) {
+      var gx = Math.floor(p.pos[i * 3] / cell), gy = Math.floor(p.pos[i * 3 + 1] / cell), gz = Math.floor(p.pos[i * 3 + 2] / cell), key = (gx + 2048) * 16777216 + (gy + 2048) * 4096 + (gz + 2048), c = cl.get(key);
+      if (c === undefined) { c = cp.length; cl.set(key, c); cp.push({ gx: gx, gy: gy, gz: gz, A: [0, 0, 0, 0, 0, 0], b: [0, 0, 0], w: 0, cx: 0, cy: 0, cz: 0, cn: 0, nx: 0, ny: 0, nz: 0 }); }
+      vc[i] = c; var q = cp[c]; q.cx += p.pos[i * 3]; q.cy += p.pos[i * 3 + 1]; q.cz += p.pos[i * 3 + 2]; q.cn++;
+    }
+    for (var t = 0; t < n; t += 3) {
+      var ia = p.idx ? p.idx[t] : t, ib = p.idx ? p.idx[t + 1] : t + 1, ic = p.idx ? p.idx[t + 2] : t + 2;
+      var ax = p.pos[ia * 3], ay = p.pos[ia * 3 + 1], az = p.pos[ia * 3 + 2], bx = p.pos[ib * 3] - ax, by = p.pos[ib * 3 + 1] - ay, bz = p.pos[ib * 3 + 2] - az, ccx = p.pos[ic * 3] - ax, ccy = p.pos[ic * 3 + 1] - ay, ccz = p.pos[ic * 3 + 2] - az;
+      var nx = by * ccz - bz * ccy, ny = bz * ccx - bx * ccz, nz = bx * ccy - by * ccx, ar = Math.sqrt(nx * nx + ny * ny + nz * nz); if (ar < 1e-12) continue;
+      nx /= ar; ny /= ar; nz /= ar; var d = -(nx * ax + ny * ay + nz * az), w = ar * .5;
+      [ia, ib, ic].forEach(function (v) {
+        var q = cp[vc[v]]; q.A[0] += w * nx * nx; q.A[1] += w * nx * ny; q.A[2] += w * nx * nz; q.A[3] += w * ny * ny; q.A[4] += w * ny * nz; q.A[5] += w * nz * nz; q.b[0] += w * nx * d; q.b[1] += w * ny * d; q.b[2] += w * nz * d; q.w += w;
+        if (p.nor) { q.nx += w * p.nor[v * 3]; q.ny += w * p.nor[v * 3 + 1]; q.nz += w * p.nor[v * 3 + 2]; } else { q.nx += w * nx; q.ny += w * ny; q.nz += w * nz; }
+      });
+      if (vc[ia] !== vc[ib] && vc[ib] !== vc[ic] && vc[ia] !== vc[ic]) tris.push(vc[ia], vc[ib], vc[ic]);
+    }
+  });
+  // 2. best position per cluster (kept inside its cell, a little leeway)
+  var used = new Int32Array(cp.length).fill(-1), nv = 0, pos = [], nor = [];
+  for (var i = 0; i < tris.length; i++) if (used[tris[i]] < 0) used[tris[i]] = nv++;
+  pos = new Float32Array(nv * 3); nor = new Float32Array(nv * 3);
+  var tmp = new Float32Array(3), tn = new Float32Array(3);
+  cp.forEach(function (q, ci) {
+    var u = used[ci]; if (u < 0) return;
+    var cx = q.cx / q.cn, cy = q.cy / q.cn, cz = q.cz / q.cn, lam = Math.max(q.w * .02, 1e-9);
+    var a = q.A, m = [a[0] + lam, a[1], a[2], a[3] + lam, a[4], a[5] + lam], r = [-q.b[0] + lam * cx, -q.b[1] + lam * cy, -q.b[2] + lam * cz];
+    var det = m[0] * (m[3] * m[5] - m[4] * m[4]) - m[1] * (m[1] * m[5] - m[4] * m[2]) + m[2] * (m[1] * m[4] - m[3] * m[2]), x = cx, y = cy, z = cz;
+    if (Math.abs(det) > 1e-14) {
+      x = (r[0] * (m[3] * m[5] - m[4] * m[4]) - m[1] * (r[1] * m[5] - m[4] * r[2]) + m[2] * (r[1] * m[4] - m[3] * r[2])) / det;
+      y = (m[0] * (r[1] * m[5] - m[4] * r[2]) - r[0] * (m[1] * m[5] - m[4] * m[2]) + m[2] * (m[1] * r[2] - r[1] * m[2])) / det;
+      z = (m[0] * (m[3] * r[2] - r[1] * m[4]) - m[1] * (m[1] * r[2] - r[1] * m[2]) + r[0] * (m[1] * m[4] - m[3] * m[2])) / det;
+    }
+    var lo = [q.gx * cell - cell * .5, q.gy * cell - cell * .5, q.gz * cell - cell * .5];
+    x = Math.min(Math.max(x, lo[0]), lo[0] + cell * 2); y = Math.min(Math.max(y, lo[1]), lo[1] + cell * 2); z = Math.min(Math.max(z, lo[2]), lo[2] + cell * 2);
+    toGame(x, y, z, pos, u * 3);
+    var nl = Math.hypot(q.nx, q.ny, q.nz) || 1; toGame(q.nx / nl, q.ny / nl, q.nz / nl, nor, u * 3); nor[u * 3] -= 0.195; nor[u * 3 + 1] -= 0.05; // (toGame shifts positions; a direction must not shift)
+  });
+  // 3. triangles, de-duplicated
+  var seen = new Set(), idx = [];
+  for (var t = 0; t < tris.length; t += 3) { var A = used[tris[t]], B = used[tris[t + 1]], C = used[tris[t + 2]], k = [A, B, C].sort(function (p, q) { return p - q; }).join(','); if (seen.has(k)) continue; seen.add(k); idx.push(A, B, C); }
+  return { pos: pos, nor: nor, idx: Uint32Array.from(idx), verts: nv, tris: idx.length / 3 };
+};
+lab.roleOf = function (p) {
+  if (lab.EXC[p.id]) return null;
+  if (p.id === 137) return 'floor'; // the underbody and wheel-arch liners, coarse, in black
+  var m = p.mat || '';
+  if (/^Glass/.test(m)) return 'glass';
+  if (/LCOVER|GLOW/.test(m)) return 'tail';
+  if (/LightsBlue|HGLOW/.test(m)) return 'light';
+  if (/^Material\./.test(m) || m === 'Material') return 'paint';
+  if (/Red\.001|Gelb/.test(m)) return 'red';
+  return 'black';
+};
+lab.build = function (cells) {
+  var out = {}; ['paint', 'black', 'glass', 'light', 'tail', 'red', 'floor'].forEach(function (r) {
+    var list = lab.prims.filter(function (p) { return lab.roleOf(p) === r; });
+    if (list.length) out[r] = lab.bake(list, cells[r] || .04);
+  });
+  lab.baked = out; return Object.keys(out).map(function (r) { return r + ': ' + out[r].tris + ' tris'; }).join(', ');
+};
+lab.showBaked = function (colors) {
+  while (root.children.length) { var o = root.children.pop(); o.geometry.dispose(); }
+  Object.keys(lab.baked).forEach(function (r) {
+    var b = lab.baked[r], g = new T.BufferGeometry(); g.setAttribute('position', new T.BufferAttribute(b.pos, 3)); g.setAttribute('normal', new T.BufferAttribute(b.nor, 3)); g.setIndex(new T.BufferAttribute(b.idx, 1));
+    var c = (colors && colors[r]) || { paint: 0xf4f4f2, black: 0x1a1b1e, glass: 0x23364a, light: 0xffffff, tail: 0xff2020, red: 0xc8102e, floor: 0x101114 }[r];
+    root.add(new T.Mesh(g, new T.MeshStandardMaterial({ color: c, roughness: r === 'glass' ? .1 : .45, metalness: r === 'black' ? .3 : .15, transparent: r === 'glass', opacity: r === 'glass' ? .6 : 1, side: T.DoubleSide, emissive: r === 'light' ? 0x667788 : 0 })));
+  });
+};
+// pack the baked parts into a small JS data file: positions as 16-bit ints (1/8192 m), normals as bytes, indices as 16-bit
+function b64(u8) { var s = '', n = 8192; for (var i = 0; i < u8.length; i += n) s += String.fromCharCode.apply(null, u8.subarray(i, i + n)); return btoa(s); }
+lab.pack = function () {
+  var S = 8192, out = {};
+  Object.keys(lab.baked).forEach(function (r) {
+    var b = lab.baked[r], p = new Int16Array(b.pos.length), n = new Int8Array(b.nor.length), ix = new Uint16Array(b.idx.length), i;
+    for (i = 0; i < p.length; i++) p[i] = Math.round(b.pos[i] * S);
+    for (i = 0; i < n.length; i++) n[i] = Math.round(b.nor[i] * 127);
+    for (i = 0; i < ix.length; i++) ix[i] = b.idx[i];
+    if (b.verts > 65535) throw new Error(r + ' has too many vertices');
+    out[r] = { p: b64(new Uint8Array(p.buffer)), n: b64(new Uint8Array(n.buffer)), i: b64(new Uint8Array(ix.buffer)), v: b.verts, t: b.tris };
+  });
+  var js = '// Porsche 963 LMDh body, reduced from "Porsche 963 LMDh Hypercar" by kilianhoffmann13 (https://sketchfab.com/kilianhoffmann13),\n// licensed CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/). Source: https://sketchfab.com/3d-models/porsche-963-lmdh-hypercar-d786aa263a804254aa92543dda11dba0\n// The mesh was simplified (about 917k triangles down to a few tens of thousands); wheels, interior and underbody were left out. Made by tools/lab963.html.\nwindow.TF = window.TF || {}; TF.P963 = ' + JSON.stringify({ s: S, parts: out }) + ';\n';
+  return js;
+};
+lab.save = async function (name) {
+  var js = lab.pack(); var r = await fetch('/__save?name=' + name, { method: 'POST', body: js }); return r.status + ' ' + js.length + ' chars';
+};
+lab.cam = function (px, py, pz, lx, ly, lz) { cam.position.set(px, py, pz); cam.lookAt(lx, ly, lz); renderer.render(scene, cam); };
+</script>

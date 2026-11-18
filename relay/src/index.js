@@ -2,8 +2,14 @@
 // Every player connects here (a WebSocket, which works through home routers); each game code gets its own
 // "room" (a Durable Object) that forwards each player's messages to everyone else in the same room.
 import { DurableObject } from 'cloudflare:workers';
+import { handleAuth } from './accounts.js';
 
 const MAX_PLAYERS = 9;
+
+// Accounts: one Durable Object keeps every username, password hash and saved game (see accounts.js).
+export class Accounts extends DurableObject {
+  async fetch(request) { return handleAuth(this.ctx.storage, request, request.headers.get('CF-Connecting-IP') || 'unknown'); }
+}
 
 export class Room extends DurableObject {
   async fetch(request) {
@@ -66,9 +72,25 @@ function originOk(origin) {
   } catch (e) { return false; }
 }
 
+function withCors(resp, origin) {
+  const r = new Response(resp.body, resp);
+  r.headers.set('Access-Control-Allow-Origin', origin || '*');
+  r.headers.set('Vary', 'Origin');
+  r.headers.set('Cache-Control', 'no-store');
+  return r;
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname.startsWith('/auth/')) { // log in / create account / saved game
+      const origin = request.headers.get('Origin');
+      if (!originOk(origin)) return new Response('Not allowed', { status: 403 });
+      if (request.method === 'OPTIONS') {
+        return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': origin || '*', 'Access-Control-Allow-Methods': 'GET, POST, PUT, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Max-Age': '86400', 'Vary': 'Origin' } });
+      }
+      return withCors(await env.ACCOUNTS.get(env.ACCOUNTS.idFromName('main')).fetch(request), origin);
+    }
     const m = url.pathname.match(/^\/room\/([A-Z0-9]{5})$/);
     if (!m) return new Response('T-Ford Speedway relay is running.', { headers: { 'Content-Type': 'text/plain' } });
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('Expected a WebSocket', { status: 426 });

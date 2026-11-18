@@ -43,7 +43,9 @@
     <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1"/></svg>
     Settings
   </button>
+  <button type="button" id="btnAccount" class="settings-btn account-btn" aria-haspopup="dialog">Log in</button>
   <button type="button" id="btnLmp" class="lmp-btn" hidden>Switch to LMP1</button>
+  <div class="credit">Porsche LMP1 model: "Porsche 963 LMDh Hypercar" by kilianhoffmann13 (sketchfab.com/kilianhoffmann13), CC-BY-4.0 · simplified for this game</div>
   <div class="title">T-Ford Speedway<small id="menuSub">FREE PRACTICE</small></div>
   <div class="menu-bottom">
     <div class="swatches" id="menuSwatches" aria-label="Paint color"></div>
@@ -136,6 +138,24 @@
     <p class="set-note">Each vehicle has its own circuit, best lap and ghost.</p>
   </div>
   <div class="buttons"><button id="btnSetBack" type="button">Back (Esc)</button></div>
+</div>
+
+<!-- account panel: log in to keep your saved game on any computer (username and password only) -->
+<div id="account" class="side-panel" hidden role="dialog" aria-labelledby="acTitle">
+  <h2 id="acTitle">Account</h2>
+  <div id="acOut" hidden>
+    <p class="set-note">Signed in as <b id="acName"></b>.</p>
+    <p class="set-note">Your colour, car number, settings, best laps and ghosts are saved to your account and follow you to any computer.</p>
+    <div class="buttons"><button id="acLogout" type="button">Log out</button></div>
+  </div>
+  <form id="acIn" autocomplete="on">
+    <label class="ac-field">Username<input id="acUser" type="text" autocomplete="username" maxlength="20" spellcheck="false" autocapitalize="off"></label>
+    <label class="ac-field">Password<input id="acPass" type="password" autocomplete="current-password" maxlength="100"></label>
+    <div class="buttons"><button id="acLogin" type="submit">Log in</button><button id="acCreate" type="button" class="quiet">Create account</button></div>
+    <p class="set-note">3 to 20 letters, numbers or _ for the username; at least 6 characters for the password. That is all it asks for. Do not reuse a password from somewhere important.</p>
+  </form>
+  <div id="acMsg" class="ac-msg" role="status"></div>
+  <div class="buttons"><button id="acBack" type="button" class="quiet">Back (Esc)</button></div>
 </div>
 
 <div id="fatal" hidden></div>

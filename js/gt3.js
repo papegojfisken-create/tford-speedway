@@ -194,7 +194,6 @@
     [-1, 1].forEach(function (s) {
       add(box(1.5, .68, .09), paint, -.15, .56, s * .84);                 // door panel
       add(box(1.5, .05, .012), accent, -.15, .38, s * .89);               // stripe
-      add(box(.1, .09, .16), paint, .3, 1.0, s * .9);                     // mirror
       add(box(.95, .12, .5), paint, 1.38, .74, s * .9); add(box(.95, .12, .5), paint, -1.32, .74, s * .9); // wide wheel arches
       add(box(2.2, .07, .07), carbon, -.1, .24, s * .93);                // side skirt
       add(box(.5, .02, .3), trim, 1.35, .81, s * .35);                    // hood vent
@@ -225,7 +224,6 @@
     add(box(.2, .03, 1.7), carbon, -2.12, 1.36, 0).rotation.z = -.18;     // upper flap
     // inside: dash, seat, driver, steering wheel
     add(box(.4, .14, 1.1), trim, .42, .84, 0);
-    add(box(.12, .55, .5), seatM, -.55, .72, -.4); add(box(.5, .1, .5), seatM, -.3, .5, -.4);
     var dr = new T.Group(); g.add(dr);
     add(box(.28, .5, .42), suit, -.36, .86, -.4, dr); add(new T.SphereGeometry(.14, 16, 12), helmet, -.2, 1.12, -.4, dr);
     add(box(.09, .07, .2), visor, -.07, 1.14, -.4, dr);
@@ -341,6 +339,7 @@
     var legs = { L: new T.Group(), R: new T.Group() }; // no kicking in a GT3, but the game expects these
     wheels.forEach(function (w) { TF.mergeGroup(w.spin); });
     TF.mergeGroup(swi); TF.mergeGroup(dr); TF.mergeGroup(g);
+    dr.visible = false; // no driver in the GT3
 
     car.userData = { body: g, wheels: wheels, steeringWheel: swi, driver: dr, legs: legs, paint: ghost ? [] : [paint], setFlash: setFlash, vehicle: 'gt3' };
     return car;

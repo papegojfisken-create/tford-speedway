@@ -35,6 +35,86 @@
   }
   function mirrorStations(st) { return st.map(function (s) { return [s[0], -s[2], -s[1], s[3], s[4]]; }); }
 
+  // the reduced Porsche 963 body (js/p963data.js): decoded once, then every car shares the same geometry
+  function p963Geos() {
+    var d = TF.P963; if (d.geos) return d.geos;
+    function u8(s) { var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+    d.geos = {};
+    Object.keys(d.parts).forEach(function (k) {
+      var q = d.parts[k], p = new Int16Array(u8(q.p).buffer), n = new Int8Array(u8(q.n).buffer), ix = new Uint16Array(u8(q.i).buffer);
+      var P = new Float32Array(p.length), N = new Float32Array(n.length), i;
+      for (i = 0; i < p.length; i++) P[i] = p[i] / d.s;
+      for (i = 0; i < n.length; i++) N[i] = n[i] / 127;
+      var G = new T.BufferGeometry(); G.setAttribute('position', new T.BufferAttribute(P, 3)); G.setAttribute('normal', new T.BufferAttribute(N, 3)); G.setIndex(new T.BufferAttribute(ix, 1));
+      d.geos[k] = G;
+    });
+    return d.geos;
+  }
+
+  // Liveries for the 963 body, one per paint colour: the paint is striped by the graphics card per pixel, so the edges stay crisp however
+  // coarse the body mesh is. Colours are hex (null = no stripe there): f1/f2/f3 = three bands along the flank (low, middle, high),
+  // ctrO/ctrI = outer and inner stripe down the nose and roof, plLo/plHi = lower and upper part of the wing end plates, fin = top of the tail fin,
+  // fr = front wing end plates and the corners of the nose. Plus the wordmark and the emblem for the nose.
+  var K_BLK = 0x0a0a0b, K_RED = 0x800004, K_WHT = 0xf4f4f2, K_PRED = 0xf0001e; // K_PRED: Porsche's bright "Guards" red
+  var LIV = {
+    porsche: { f1: K_BLK, f2: K_BLK, f3: K_PRED, ctrO: K_PRED, ctrI: K_BLK, plLo: K_BLK, plHi: K_PRED, fin: K_PRED, fr: K_PRED, word: function () { return TF.porscheDecal('word'); }, ws: [.8, .15], emb: function () { return TF.porscheDecal('crest'); }, es: [.2, .2] },
+    ferrari: { nose3: [0x009246, 0xf4f4f2, 0xce2b37], f1: K_BLK, f2: K_BLK, f3: 0xffd400, fr: 0xffd400, plLo: 0x009246, plHi: 0xce2b37, word: function () { return TF.ferrariDecal('word'); }, ws: [.75, .19], emb: function () { return TF.ferrariDecal('shield'); }, es: [.18, .2] },
+    audi: { f1: 0xc9ccd2, f2: 0xc9ccd2, f3: 0xd0021b, plLo: 0xc9ccd2, plHi: 0xd0021b, fr: 0xd0021b, word: function () { return TF.audiDecal('word'); }, ws: [.8, .15], emb: function () { return TF.audiDecal('rings'); }, es: [.3, .1] },
+    bmw: { f1: 0x81c4ff, f2: 0x16288f, f3: 0xe4002b, ctrO: 0x81c4ff, ctrI: 0x16288f, plLo: 0x16288f, plHi: 0x81c4ff, fr: 0xe4002b, word: function () { return TF.bmwDecal('word'); }, ws: [.8, .15], emb: function () { return TF.bmwDecal('roundel'); }, es: [.2, .2] },
+    mclaren: { f1: K_BLK, f2: K_BLK, f3: K_WHT, ctrI: K_BLK, plLo: K_BLK, plHi: K_WHT, fr: K_BLK, word: function () { return TF.mclarenDecal('word'); }, ws: [.8, .15], emb: function () { return TF.mclarenDecal('speed'); }, es: [.4, .15] },
+    aston: { f1: K_BLK, f2: K_BLK, f3: 0xb8e600, ctrI: 0xb8e600, plLo: K_BLK, plHi: 0xb8e600, fr: 0xb8e600, word: function () { return TF.astonDecal('word'); }, ws: [.8, .15], emb: function () { return TF.astonDecal('wings'); }, es: [.3, .11] }
+  };
+  function v3(h) { return 'vec3(' + [(h >> 16) & 255, (h >> 8) & 255, h & 255].map(function (x) { return (x / 255).toFixed(3); }).join(',') + ')'; }
+  function liveryShader(sp) {
+    return function (sh) {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\n#include <common>').replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vON = normal;');
+      var L = [
+        '#include <color_fragment>',
+        'vec3 P = vOP; vec3 Nn = normalize(vON); float az = abs(P.z); vec3 lc = diffuseColor.rgb;',
+        'float flank = smoothstep(.15, .25, abs(Nn.z)) * bnd(P.x, -2.3, 1.9) * smoothstep(.37, .41, az);',
+        'float up = smoothstep(.3, .4, Nn.y);',
+        'float nose = up * bnd(P.x, 1.0, 2.5); float roof = up * bnd(P.x, -.9, .95) * smoothstep(.88, .92, P.y);',
+        'float plate = bnd(P.x, -3., -1.7) * smoothstep(.83, .87, az); float plow = 1. - smoothstep(.79, .81, P.y);'];
+      if (sp.f1 != null) L.push('lc = mix(lc, ' + v3(sp.f1) + ', flank * bnd(P.y, .3, .37));');
+      if (sp.f2 != null) L.push('lc = mix(lc, ' + v3(sp.f2) + ', flank * bnd(P.y, .37, .43));');
+      if (sp.f3 != null) L.push('lc = mix(lc, ' + v3(sp.f3) + ', flank * bnd(P.y, .43, .49));');
+      if (sp.ctrO != null) L.push('lc = mix(lc, ' + v3(sp.ctrO) + ', nose * (1. - smoothstep(.125, .135, az))); lc = mix(lc, ' + v3(sp.ctrO) + ', roof * (1. - smoothstep(.11, .12, az)));');
+      if (sp.ctrI != null) L.push('lc = mix(lc, ' + v3(sp.ctrI) + ', nose * (1. - smoothstep(.085, .095, az))); lc = mix(lc, ' + v3(sp.ctrI) + ', roof * (1. - smoothstep(.075, .085, az)));');
+      if (sp.nose3) L.push('lc = mix(lc, ' + v3(sp.nose3[0]) + ', nose * bnd(P.z, -.12, -.04)); lc = mix(lc, ' + v3(sp.nose3[1]) + ', nose * bnd(P.z, -.04, .04)); lc = mix(lc, ' + v3(sp.nose3[2]) + ', nose * bnd(P.z, .04, .12)); lc = mix(lc, vec3(.02), nose * (bnd(P.z, -.13, -.12) + bnd(P.z, .12, .13)));'); // three stripes side by side down the nose
+      if (sp.plLo != null) L.push('lc = mix(lc, ' + v3(sp.plLo) + ', plate * plow);');
+      if (sp.plHi != null) L.push('lc = mix(lc, ' + v3(sp.plHi) + ', plate * (1. - plow));');
+      if (sp.fin != null) L.push('lc = mix(lc, ' + v3(sp.fin) + ', bnd(P.x, -3., -1.0) * (1. - smoothstep(.055, .065, az)) * smoothstep(.97, .99, P.y));');
+      if (sp.fr != null) L.push('lc = mix(lc, ' + v3(sp.fr) + ', smoothstep(2.24, 2.26, P.x) * smoothstep(.77, .79, az));');
+      L.push('sm = min(1., dot(abs(lc - diffuseColor.rgb), vec3(1.)) * 4.); diffuseColor.rgb = lc;'); // sm: how much of this pixel is stripe
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\nfloat sm;\nfloat bnd(float v, float a, float b) { float e = .004; return smoothstep(a - e, a + e, v) * (1. - smoothstep(b - e, b + e, v)); }\n#include <common>')
+        .replace('#include <color_fragment>', L.join('\n'))
+        // stripes are matte and take no self-light, so red stays red instead of washing out to pink
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, .6, sm);')
+        .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor *= (1. - sm);')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= (1. - sm);');
+    };
+  }
+  // the outermost point of the body in a box: where to stick a decal
+  function bodyEdge(box, sign) {
+    var G = TF.P963.geos.paint, P = G.attributes.position.array, best = null;
+    for (var i = 0; i < P.length; i += 3) if (P[i] > box[0] && P[i] < box[1] && P[i + 1] > box[2] && P[i + 1] < box[3] && P[i + 2] * sign > 0) { var a = Math.abs(P[i + 2]); if (best === null || a > best) best = a; }
+    return best;
+  }
+
+  // the tail fin: its top height and its half thickness at a given x, found from the body itself (only points close to the centre line)
+  function finAt(x0) {
+    var P = TF.P963.geos.paint.attributes.position.array, top = 0, hw = 0, i;
+    for (i = 0; i < P.length; i += 3) if (Math.abs(P[i] - x0) < .15 && Math.abs(P[i + 2]) < .12 && P[i + 1] > top) top = P[i + 1];
+    for (i = 0; i < P.length; i += 3) if (Math.abs(P[i] - x0) < .15 && Math.abs(P[i + 2]) < .12 && P[i + 1] > top - .2 && Math.abs(P[i + 2]) > hw) hw = Math.abs(P[i + 2]);
+    return { top: top, hw: hw };
+  }
+  // the highest point of the body near the centre line, for the nose number
+  function bodyEdgeTop(xr, zr) {
+    var P = TF.P963.geos.paint.attributes.position.array, best = 0.5;
+    for (var i = 0; i < P.length; i += 3) if (P[i] > xr[0] && P[i] < xr[1] && Math.abs(P[i + 2]) < zr && P[i + 1] > best) best = P[i + 1];
+    return best;
+  }
+
   TF.buildLmp1 = function (color, ghost, number) {
     var std = TF.std, ferrari = !ghost && color === TF.FERRARI, num = String(number == null ? 7 : number), label = num + (ferrari ? 'F' : '');
     var numTex = numTexes[label] || (numTexes[label] = TF.canvasTex(128, 128, function (x) {
@@ -94,15 +174,19 @@
     }
     wheel(1.62, -.88, true); wheel(1.62, .88, true); wheel(-1.5, -.9, false); wheel(-1.5, .9, false);
 
+    var model = !ghost && !!TF.P963; // the real 963 body (with a livery per paint colour) instead of the generic shell; the ghost stays a simple outline
+    if (!model) {
     // central tub with the long pointed nose and the tail
-    var tub = [[2.62, -.04, .04, .15, .21], [2.42, -.2, .2, .14, .29], [2.1, -.35, .35, .12, .37], [1.6, -.47, .47, .1, .49], [.9, -.51, .51, .1, .58],
+    var tub =[[2.62, -.04, .04, .15, .21], [2.42, -.2, .2, .14, .29], [2.1, -.35, .35, .12, .37], [1.6, -.47, .47, .1, .49], [.9, -.51, .51, .1, .58],
       [.3, -.53, .53, .1, .62], [-.4, -.54, .54, .1, .64], [-1.0, -.52, .52, .1, .72], [-1.7, -.46, .46, .12, .76], [-2.2, -.34, .34, .2, .66], [-2.52, -.2, .2, .3, .52]];
     add(loft(tub, 2.4, 20), paint, 0, 0, 0);
     // front wheel arches and rear wheel fairings, sidepods
-    var fArch = [[2.2, .38, .68, .3, .5], [1.98, .42, 1.0, .42, .76], [1.62, .4, 1.1, .5, .86], [1.28, .42, .98, .46, .76], [.98, .5, .72, .4, .6]];
+    // (the 919 has sharp, tall front fender crests with a low nose valley between them)
+    var fArch = porsche ? [[2.3, .36, .62, .28, .48], [2.08, .4, .94, .4, .74], [1.8, .38, 1.08, .45, .9], [1.4, .38, 1.1, .46, .92], [1.05, .42, .98, .44, .84], [.75, .5, .8, .42, .7]]
+      : [[2.2, .38, .68, .3, .5], [1.98, .42, 1.0, .42, .76], [1.62, .4, 1.1, .5, .86], [1.28, .42, .98, .46, .76], [.98, .5, .72, .4, .6]];
     var rArch = [[-.7, .5, .78, .45, .8], [-1.0, .45, 1.12, .5, .92], [-1.5, .4, 1.22, .5, 1.0], [-2.0, .4, 1.08, .5, .92], [-2.42, .3, .72, .5, .76]];
     var pod = [[1.0, .44, .78, .24, .5], [.5, .44, .82, .22, .56], [-.1, .44, .82, .22, .58], [-.75, .46, .7, .3, .6]];
-    [fArch, rArch, pod].forEach(function (st) { add(loft(st, 2.6, 18), paint, 0, 0, 0); add(loft(mirrorStations(st), 2.6, 18), paint, 0, 0, 0); });
+    [fArch, rArch, pod].forEach(function (st) { var ex = porsche ? (st === fArch ? 2.9 : st === rArch ? 2.8 : 2.6) : 2.6; /* the 963's bodywork is rounder than the 919's */ add(loft(st, ex, 18), paint, 0, 0, 0); add(loft(mirrorStations(st), ex, 18), paint, 0, 0, 0); });
 
     [-1, 1].forEach(function (s) {
       add(box(.5, .14, .05), trim, .35, .44, s * .83);           // sidepod intakes
@@ -110,32 +194,49 @@
       if (bmw) { /* kidney lights are added with the BMW details */ }
       else if (audi) for (var al = 0; al < 3; al++) add(box(.34, .022, .16), led, 2.05, .31 + al * .045, s * .26); // the R18's stacked LED strips
       else if (!porsche) add(box(.32, .05, .14), led, 2.05, .35, s * .24);          // front light strips
-      else for (var li = 0; li < 4; li++) add(box(.035, .15 - li * .015, .04), led, 2.14 - li * .01, .4, s * (.43 + li * .065)); // the 919's four vertical LED bars
-      add(box(.04, .2, .34), tail, -2.5, .46, s * .12);          // tail lights
+      else for (var li = 0; li < 4; li++) add(box(.035, .17 - li * .02, .04), led, 2.2 - li * .035, .5 + li * .012, s * (.5 + li * .075)); // the 919's four vertical LED bars in the fender nose
+      if (!porsche) add(box(.04, .2, .34), tail, -2.5, .46, s * .12);          // tail lights
+      else add(box(.03, .045, .3), tail, -2.56, .6, s * .2);                   // the 919's slim LED tail light
       add(cyl(.05, .3, 10).rotateZ(Math.PI / 2), silver, -2.45, .4, s * .2); // exhaust tips
-      add(box(1.0, .55, .035), paint, -2.3, 1.0, s * .88);       // rear wing end plates
-      if (!porsche) add(box(.4, .3, .036), accent, -2.5, 1.04, s * .88);
-      else { add(box(.9, .07, .04), accent, -2.3, .86, s * .88); add(box(.9, .05, .04), carbon, -2.3, .77, s * .88); } // white end plates with a red and a black stripe
-      add(box(.5, .32, .03), paint, 2.55, .3, s * .7);           // front wing end plates
+      if (!porsche) {
+        add(box(1.0, .55, .035), paint, -2.3, 1.0, s * .88);     // rear wing end plates
+        add(box(.4, .3, .036), accent, -2.5, 1.04, s * .88);
+        add(box(.5, .32, .03), paint, 2.55, .3, s * .7);         // front wing end plates
+      } else { // 919: tall rear end plates with a red and a black stripe, big front end plates
+        add(box(1.15, .74, .035), paint, -2.35, 1.06, s * .93);
+        add(box(1.0, .07, .04), accent, -2.35, .86, s * .93); add(box(1.0, .05, .04), carbon, -2.35, .77, s * .93); add(box(.5, .06, .04), accent, -2.55, 1.22, s * .93);
+        add(box(.72, .44, .04), paint, 2.55, .33, s * .92);
+        add(box(.5, .05, .045), accent, 2.55, .22, s * .92);
+      }
     });
     // floor, splitter, diffuser
     add(box(4.5, .05, 1.74), carbon, -.1, .09, 0);
     add(box(.75, .04, 1.6), carbon, 2.55, .08, 0);
     add(box(.55, .05, 1.5), carbon, -2.3, .2, 0).rotation.z = .25;
-    add(box(.4, .03, 1.4), carbon, 2.62, .3, 0);                 // front wing plane
-    // tail fin and the two-element rear wing
-    add(prism([[-0.8, .74], [-2.3, 1.02], [-2.58, 1.08], [-2.58, .56], [-1.6, .62]], .05, .012), paint, 0, 0, 0);
-    add(box(.62, .045, 1.76), carbon, -2.4, 1.1, 0).rotation.z = -.12;
-    add(box(.4, .04, 1.76), carbon, -2.3, 1.3, 0).rotation.z = -.22;
+    if (!porsche) add(box(.4, .03, 1.4), carbon, 2.62, .3, 0);   // front wing plane
+    else { add(box(.46, .035, 1.84), carbon, 2.6, .27, 0); add(box(.3, .03, 1.84), carbon, 2.48, .38, 0).rotation.z = .12; } // two-element front wing
+    // tail fin and the two-element rear wing (the 919's fin is taller and runs right up to the wing)
+    if (!porsche) {
+      add(prism([[-0.8, .74], [-2.3, 1.02], [-2.58, 1.08], [-2.58, .56], [-1.6, .62]], .05, .012), paint, 0, 0, 0);
+      add(box(.62, .045, 1.76), carbon, -2.4, 1.1, 0).rotation.z = -.12;
+      add(box(.4, .04, 1.76), carbon, -2.3, 1.3, 0).rotation.z = -.22;
+    } else {
+      add(prism([[-0.3, .84], [-0.9, 1.0], [-2.3, 1.2], [-2.6, 1.22], [-2.6, .56], [-1.6, .62]], .05, .012), paint, 0, 0, 0); // the 963's long shark fin
+      add(box(.42, .18, .36), trim, -.5, 1.15, 0);                 // big roof air scoop
+      add(box(.66, .05, 1.86), carbon, -2.4, 1.14, 0).rotation.z = -.12;
+      add(box(.44, .045, 1.86), carbon, -2.32, 1.36, 0).rotation.z = -.22;
+    }
+    } else { [-1, 1].forEach(function (s) { add(cyl(.05, .3, 10).rotateZ(Math.PI / 2), silver, -2.45, .4, s * .2); }); } // (the 963 body has its own wings and lights; just the exhaust tips are added)
 
     // cockpit: bubble canopy (tinted from outside, see-through from inside), roof, air intake above it
-    E(.9, .3, .4, -.15, .8, 0, glass);
-    E(.6, .08, .34, -.25, 1.07, 0, paint);
+    if (!model) {
+    if (porsche) { E(1.1, .3, .42, .05, .8, 0, glass); E(.72, .07, .34, -.2, 1.07, 0, paint); } // 919: a longer canopy with a big windscreen
+    else { E(.9, .3, .4, -.15, .8, 0, glass); E(.6, .08, .34, -.25, 1.07, 0, paint); }
     add(box(.34, .12, .3), trim, -.55, 1.12, 0);
     add(box(.34, .02, .3), carbon, -.55, 1.19, 0);
     [-1, 1].forEach(function (s) { rod(V(.58, .66, s * .33), V(.1, 1.0, s * .27), .03, carbon); }); // A pillars
-    add(box(.34, .12, .76), trim, .52, .73, 0);                  // dash
-    add(box(.1, .5, .46), seatM, -.55, .82, -.12);               // seat back
+    }
+    if (!model) add(box(.34, .12, .76), trim, .52, .73, 0);      // dash
     var dr = new T.Group(); g.add(dr);
     add(box(.26, .44, .38), suit, -.34, .84, -.12, dr); add(new T.SphereGeometry(.13, 16, 12), helmet, -.22, 1.06, -.12, dr);
     add(box(.09, .07, .2), visor, -.1, 1.07, -.12, dr);
@@ -149,25 +250,26 @@
     add(box(.04, .04, .025), accent, 0, .07, 0, swi);
 
     // Porsche 919 Hybrid livery: black and red bands along the nose and sidepods, black front wing and roof, wordmarks, crest
-    if (porsche) {
+    if (porsche && !model) {
       [-1, 1].forEach(function (s) {
         add(box(1.7, .08, .02), carbon, .1, .47, s * .812);       // black band on the sidepod
         add(box(1.7, .05, .02), accent, .1, .395, s * .822);      // red band below it
-        for (var lv = 0; lv < 4; lv++) add(box(.05, .014, .34), carbon, 1.42 + lv * .11, .875 - lv * .008, s * .78); // louvres on the front fender
-        add(box(.5, .12, .02), carbon, 1.7, .62, s * 1.0).rotation.y = s * .05; // black front fender side vent
+        add(box(.5, .012, .34), carbon, 1.5, .925, s * .8);       // one wide black air outlet on the front fender
+        for (var lv = 0; lv < 3; lv++) add(box(.04, .016, .34), accent, 1.35 + lv * .15, .93, s * .8); // with red slats
+        add(box(.55, .12, .02), carbon, 1.7, .66, s * 1.095).rotation.y = s * .04; // black front fender side vent
         add(box(.5, .02, .09), carbon, 1.75, .465, s * .18).rotation.y = s * .25;  // black stripes angling over the nose
         add(box(.5, .02, .05), accent, 1.55, .515, s * .22).rotation.y = s * .25;
       });
       E(.45, .05, .3, -.3, 1.12, 0, carbon);                      // black roof insert
       var wm = std({ map: TF.porscheDecal('word'), transparent: true, roughness: .6 });
       [-1, 1].forEach(function (s) {
-        var f = new T.Mesh(new T.PlaneGeometry(.9, .17), wm); f.position.set(-1.65, .79, s * .043); f.rotation.z = -.185 * s; if (s < 0) f.rotation.y = Math.PI; g.add(f); // on the tail fin
+        var f = new T.Mesh(new T.PlaneGeometry(1.0, .19), wm); f.position.set(-1.65, .87, s * .043); f.rotation.z = -.13 * s; if (s < 0) f.rotation.y = Math.PI; g.add(f); // on the tail fin
       });
-      var wing = new T.Mesh(new T.PlaneGeometry(1.2, .23).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), wm); wing.position.set(-2.4, 1.126, 0); wing.rotation.z = -.12; g.add(wing); // across the rear wing
+      var wing = new T.Mesh(new T.PlaneGeometry(1.2, .23).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), wm); wing.position.set(-2.4, 1.17, 0); wing.rotation.z = -.12; g.add(wing); // across the rear wing
       var crest = new T.Mesh(new T.PlaneGeometry(.16, .16).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), std({ map: TF.porscheDecal('crest'), transparent: true, roughness: .5 })); crest.position.set(2.05, .395, 0); g.add(crest);
     }
     // Aston Martin Valkyrie: racing green with lime stripes, a lime centre stripe over the roof, wings badge, ASTON MARTIN on the fin and wing
-    if (ast) {
+    if (ast && !model) {
       var aw = std({ map: TF.astonDecal('wings'), transparent: true, roughness: .45 }), an = std({ map: TF.astonDecal('word'), transparent: true, roughness: .6 });
       add(box(.5, .014, .08), accent, -.25, 1.153, 0);                                // lime stripe over the roof
       add(box(.34, .014, .06), accent, -.55, 1.205, 0);                               // ... and over the air intake
@@ -182,7 +284,7 @@
       var ww = new T.Mesh(new T.PlaneGeometry(1.2, .23).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), an); ww.position.set(-2.4, 1.126, 0); ww.rotation.z = -.12; g.add(ww);
     }
     // McLaren prototype: papaya orange with a black band and white pinstripe, black wing, the speedmark and McLaren wordmark
-    if (mcl) {
+    if (mcl && !model) {
       var sm = std({ map: TF.mclarenDecal('speed'), transparent: true, roughness: .5 }), mw = std({ map: TF.mclarenDecal('word'), transparent: true, roughness: .6 });
       [-1, 1].forEach(function (s) {
         add(box(1.7, .08, .02), carbon, .1, .47, s * .812);
@@ -194,7 +296,7 @@
       var wm2 = new T.Mesh(new T.PlaneGeometry(1.2, .23).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), mw); wm2.position.set(-2.4, 1.126, 0); wm2.rotation.z = -.12; g.add(wm2);
     }
     // BMW M Hybrid V8 details: the three M stripes along the sidepods and rear wing plates, kidney-shaped nose lights, roundel, BMW M on the fin
-    if (bmw) {
+    if (bmw && !model) {
       var rd = std({ map: TF.bmwDecal('roundel'), transparent: true, roughness: .4 }), bw = std({ map: TF.bmwDecal('word'), transparent: true, roughness: .6 });
       [-1, 1].forEach(function (s) {
         TF.BMW_STRIPES.forEach(function (c, i) {
@@ -208,7 +310,7 @@
       var nb = new T.Mesh(new T.PlaneGeometry(.18, .18).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), rd); nb.position.set(1.85, .435, 0); g.add(nb);
     }
     // Audi R18 details: silver and red bands along the sidepods, four rings on the nose and fin, AUDI SPORT on the fin and the rear wing
-    if (audi) {
+    if (audi && !model) {
       var rg = std({ map: TF.audiDecal('rings'), transparent: true, roughness: .35, metalness: .6 }), wd = std({ map: TF.audiDecal('word'), transparent: true, roughness: .6 });
       [-1, 1].forEach(function (s) {
         add(box(1.7, .05, .02), silver, .1, .47, s * .812);
@@ -220,7 +322,7 @@
       var wr = new T.Mesh(new T.PlaneGeometry(1.3, .24).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), wd); wr.position.set(-2.4, 1.126, 0); wr.rotation.z = -.12; g.add(wr);
     }
     // Ferrari 499P details: black sidepod band with a yellow pinstripe, Italian tricolour on the rear wing plates, script wordmark on the fin, shields
-    if (ferrari) {
+    if (ferrari && !model) {
       var fw = std({ map: TF.ferrariDecal('word'), transparent: true, roughness: .6 }), sh = std({ map: TF.ferrariDecal('shield'), transparent: true, roughness: .5 });
       [-1, 1].forEach(function (s) {
         add(box(1.7, .08, .02), carbon, .1, .47, s * .812);
@@ -261,8 +363,36 @@
     var legs = { L: new T.Group(), R: new T.Group() };
     wheels.forEach(function (w) { TF.mergeGroup(w.spin); });
     TF.mergeGroup(swi); TF.mergeGroup(dr); TF.mergeGroup(g);
+    dr.visible = false; // no driver in the prototype
+    // the 963 body goes in after the merge: its geometry is shared by every Porsche on the track instead of copied
+    if (model) {
+      // every paint colour wears its own livery on the same body (see LIV): the model's black parts (wings, flaps, splitter, vents) and the underbody take the body paint
+      var brand = porsche ? 'porsche' : ferrari ? 'ferrari' : audi ? 'audi' : bmw ? 'bmw' : mcl ? 'mclaren' : ast ? 'aston' : 'porsche', LV = LIV[brand];
+      if (paint.emissive) paint.emissive.setHex(brand === 'porsche' ? 0x1a1a1c : 0x000000); // a little self-light so white stays white in shade
+      if (brand !== 'porsche') { paint.metalness = .1; paint.envMapIntensity = .4; } // coloured paints: less shine, so they do not look washed out
+      if (brand === 'ferrari') { paint.color.setHex(0xd00000); paint.emissive.setHex(0x1e0000); paint.metalness = 0; paint.roughness = .38; paint.envMapIntensity = .22; } // Rosso Corsa: a deep, strong red instead of a pinkish one
+      paint.customProgramCacheKey = function () { return 'p963' + brand; };
+      paint.onBeforeCompile = liveryShader(LV);
+      paint.side = T.DoubleSide; // the shell has small gaps and openings: this fills them with the white of the panel behind instead of showing the dark inside
+      var PG = p963Geos(), roleMat = { paint: paint, black: paint, glass: glass, light: led, tail: tail, red: accent, floor: M({ color: 0xdcdcde, roughness: .5 }) };
+      Object.keys(PG).forEach(function (k) {
+        var pm = new T.Mesh(PG[k], roleMat[k] || carbon);
+        if (k !== 'glass') { pm.castShadow = true; pm.receiveShadow = true; }
+        g.add(pm);
+      });
+      // the number sits low on the flank just in front of the rear wheel; the wordmark takes the spot by the cockpit; an emblem goes on the nose
+      var wmM = std({ map: LV.word(), transparent: true, roughness: .6, polygonOffset: true, polygonOffsetFactor: -2 }), rdM = std({ map: numTex, transparent: true, roughness: .6, polygonOffset: true, polygonOffsetFactor: -2 });
+      var fin = finAt(-1.65); // the name goes on both sides of the tail fin, following its sloping top edge
+      [-1, 1].forEach(function (s) {
+        var e1 = bodyEdge([-1.05, -.75, .35, .55], s);
+        if (e1) { var r = new T.Mesh(new T.CircleGeometry(.17, 28), rdM); r.position.set(-.92, .45, s * (e1 + .006)); if (s < 0) r.rotation.y = Math.PI; g.add(r); }
+        if (fin.top > .7) { var w = new T.Mesh(new T.PlaneGeometry(LV.ws[0] * 1.15, LV.ws[1] * 1.15), wmM); w.position.set(-1.65, fin.top - .14, s * (fin.hw + .005)); w.rotation.z = -.14 * s; if (s < 0) w.rotation.y = Math.PI; g.add(w); }
+      });
+      var emM = std({ map: LV.emb(), transparent: true, roughness: .5, polygonOffset: true, polygonOffsetFactor: -2 });
+      var em = new T.Mesh(new T.PlaneGeometry(LV.es[0], LV.es[1]).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), emM); em.position.set(2.0, bodyEdgeTop([1.95, 2.05], 0.12) + .006, 0); g.add(em);
+    }
 
-    car.userData = { body: g, wheels: wheels, steeringWheel: swi, driver: dr, legs: legs, paint: ghost ? [] : [paint], setFlash: function () { }, setBoost: setBoost, vehicle: 'lmp1' };
+    car.userData = { body: g, wheels: wheels, steeringWheel: swi, driver: dr, legs: legs, paint: ghost ? [] : [paint], setFlash: function () { }, setBoost: setBoost, vehicle: 'lmp1', eye: model ? [0.2, 0.9, 0] : null };
     return car;
   };
 })();

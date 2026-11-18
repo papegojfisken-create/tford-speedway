@@ -40,6 +40,7 @@
   function persist() {
     save.store[save.veh] = lapEntry(save.veh);
     try { localStorage.setItem(SAVE_KEY, JSON.stringify({ laps: save.laps, lmpU: save.lmpOk, num: save.num, color: save.color, ai: save.ai, aiGt3: save.aiGt3, aiLmp: save.aiLmp, veh: save.veh, store: save.store })); } catch (e) { /* storage unavailable */ }
+    if (TF.account) TF.account.queue(); // when logged in, the saved game is copied to the account a few seconds later
   }
 
   TF.setTrack(VEH[save.veh].track); LAP = K.LAP; START_S = K.START; // the circuit that goes with the vehicle in use
@@ -710,6 +711,7 @@
   // ---------- keyboard ----------
   var DRIVE_KEYS = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Space: 1, KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1 };
   window.addEventListener('keydown', function (e) {
+    if (TF.uiLock) return; // the account panel is open
     var c = e.code;
     if (e.target && e.target.id === 'joinCode') { if (c === 'Enter' || c === 'NumpadEnter') doJoin(); return; } // typing a game code
     if (e.target && /^(ai(Count|Gt3|Lmp)|carNum|raceLaps)$/.test(e.target.id) && c !== 'Enter' && c !== 'NumpadEnter') return; // let the sliders use their own keys
@@ -887,7 +889,7 @@
       flashLight.position.set(phys.x + ffx * 2.2, loc.y + 0.7, phys.z + ffz * 2.2);
       flashLight.target.position.set(phys.x + ffx * 30, loc.y, phys.z + ffz * 30); flashLight.target.updateMatrixWorld();
     }
-    car.userData.driver.visible = !(state === 'drive' && camMode === 'driver') && !(state === 'pause' && camMode === 'driver');
+    if (!car.userData.vehicle) car.userData.driver.visible = !(state === 'drive' && camMode === 'driver') && !(state === 'pause' && camMode === 'driver'); // (the GT3 and prototype have no driver at all)
     car.updateMatrixWorld(true);
     world.followSun(phys.x, loc.y, phys.z);
   }
@@ -924,7 +926,7 @@
       cam.position.set(phys.x + bf * 0.3, phys.loc.y + cb.up - 0.6, phys.z + bz * 0.3);
       cam.lookAt(phys.x - bf * 25, phys.loc.y + 0.9, phys.z - bz * 25);
     } else if (camMode === 'driver') {
-      var ey = phys.cfg.eye;
+      var ey = car.userData.eye || phys.cfg.eye; // a model can give its own seat position
       cam.fov = 66; cam.near = 0.1;
       cam.position.copy(body.localToWorld(tmpV.set(ey[0], ey[1], ey[2])));
       eul.set(phys.cfg.eyePitch, lookBack ? Math.PI / 2 : -Math.PI / 2, 0); // turned right round when looking back
