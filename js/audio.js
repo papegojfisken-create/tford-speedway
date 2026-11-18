@@ -68,6 +68,12 @@
   };
 
   // "ah-OO-gah"
+  // a short clean beep (the start lights)
+  Sound.prototype.beep = function (freq, len) {
+    if (!this.ctx) return; var c = this.ctx, t = c.currentTime, o = c.createOscillator(), g = c.createGain();
+    o.type = 'sine'; o.frequency.value = freq; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + len);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + len + 0.05);
+  };
   Sound.prototype.horn = function () {
     if (!this.ctx) return; var c = this.ctx, t = c.currentTime;
     if (this.hornUntil && t < this.hornUntil) return; this.hornUntil = t + 1.0;

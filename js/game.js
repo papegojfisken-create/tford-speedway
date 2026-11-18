@@ -314,10 +314,12 @@
   }
   function netUpdate(dt) {
     var peers = net.peers(), seen = {}, ids = [], since = {}, id;
+    menuWait = 0;
     for (var i = 0; i < peers.length; i++) {
       var pr = peers[i]; if (pr.kind !== 'viewer') continue;
       if (pr.sameTab) { myPeer = pr.peer; if (state !== 'menu') { ids.push(pr.peer); since[pr.peer] = joinedAt; } continue; }
-      var ps = pr.presence; if (!ps || !Array.isArray(ps.c) || ps.c.length < 7 || !ps.st) continue; // still on the start screen: not on track
+      var ps = pr.presence; if (ps && Array.isArray(ps.c) && ps.c.length >= 7 && !ps.st) menuWait++; // in the room but still on the start screen
+      if (!ps || !Array.isArray(ps.c) || ps.c.length < 7 || !ps.st) continue; // still on the start screen: not on track
       ids.push(pr.peer); seen[pr.peer] = 1; since[pr.peer] = +ps.t || 0;
       var o = remotes[pr.peer];
       if (!o) { o = remotes[pr.peer] = makeRemote(pr.peer, ps.col | 0, ps.veh); o.phys.x = +ps.c[0] || 0; o.phys.z = +ps.c[1] || 0; o.phys.psi = +ps.c[2] || 0; }
@@ -377,7 +379,7 @@
       lastSend = now;
       var moving = state === 'drive', msg = {
         c: [r2(phys.x), r2(phys.z), r3(phys.psi), moving ? r2(phys.u) : 0, moving ? r2(phys.v) : 0, moving ? r3(phys.r) : 0, r3(phys.delta), r2(Math.max(0, phys.air)), phys.airSide, r2(phys.wobble)],
-        col: save.color, n: save.num, veh: myVeh, trk: K.id, bo: phys.boosting ? 1 : 0, st: state === 'menu' ? 0 : moving ? 1 : 2, t: joinedAt, k: [kickSeq, kickTo], fl: flashSeq, ai: null, ac: aiCounts()
+        col: save.color, n: save.num, veh: myVeh, trk: K.id, bo: phys.boosting ? 1 : 0, st: state === 'menu' ? 0 : moving ? 1 : 2, t: joinedAt, rd: gridHold && !readyMe ? 0 : 1, k: [kickSeq, kickTo], fl: flashSeq, ai: null, ac: aiCounts()
       };
       if (isHost && state !== 'menu') { msg.ai = []; for (i = 0; i < ais.length; i++) { var q2 = ais[i].phys; msg.ai.push(r2(q2.x), r2(q2.z), r3(q2.psi), r2(q2.u), r3(q2.delta)); } }
       net.send(msg);
@@ -445,6 +447,7 @@
     phys.place(START_S, 0); phys.ps = null; for (var rid in remotes) remotes[rid].phys.ps = null; q = START_S - K.LINE; sPrev = START_S; lap = -1; lapT = 0; lapValid = true; rec = newRec(); gp = 0; gap = null; wrongT = 0;
     raceCount = 0; raceT = 0; finished = false; endT = 0;
     camYaw = phys.psi; placeAis();
+    gridSig = ''; // (if we are on the grid, the places are worked out again)
   }
   resetRun();
 
@@ -652,7 +655,58 @@
     var s = START_S - 6 * Math.floor(sl / 3); phys.place(s, [0, 3, -3][sl % 3]);
     q = s - K.LINE; sPrev = phys.loc.s; camYaw = phys.psi;
   }
-  function startDrive() { if (state === 'menu') { if (slot > 0) gridPlace(slot); joinedAt = Date.now(); } state = 'drive'; $('menu').hidden = true; $('pause').hidden = true; hud.hidden = false; sound.start(); }
+  // At Spa the race starts from a standing grid: everybody presses Ready, then five red lights come on one second apart and go out.
+  // Until then no car moves, the AI included. A player waits while anyone in the room is still on the start screen or has not pressed Ready.
+  var gridHold = false, readyMe = false, lightsT = -1, lampsOn = 0, gridSig = '', menuWait = 0, RANK = { lmp1: 0, gt3: 1, tford: 2 };
+  function gridSignature() {
+    var a = [myVeh, K.id, aiCounts().join('.')];
+    Object.keys(remotes).sort().forEach(function (id) { a.push(id, remotes[id].veh, remotes[id].pres ? remotes[id].pres.t : 0); });
+    return a.join(',');
+  }
+  // every car in the room gets a place: prototypes in front, then GT3s; in each class the AI cars first and the players behind them,
+  // so a player always starts at the back of their own field
+  function layoutGrid() {
+    var ent = [];
+    ais.forEach(function (a, k) { ent.push({ r: RANK[a.veh], g: 0, t: k, id: '', ai: a }); });
+    ent.push({ r: RANK[myVeh], g: 1, t: joinedAt || Date.now(), id: myPeer || '~', me: true });
+    for (var id in remotes) { var o = remotes[id]; ent.push({ r: RANK[o.veh], g: 1, t: o.pres ? +o.pres.t || 0 : 0, id: id }); }
+    ent.sort(function (a, b) { return (a.r - b.r) || (a.g - b.g) || (a.t - b.t) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0); });
+    var last = Math.floor((ent.length - 1) / 2);
+    ent.forEach(function (e, i) {
+      var s = START_S + 8 * (last - Math.floor(i / 2)), lane = i % 2 ? 3 : -3;
+      if (e.ai) { if (isHost) { var p = e.ai.phys; p.place(s, lane); e.ai.lane = p.loc.d; e.ai.stuck = 0; p.boostE = 0.4; p.ps = null; } }
+      else if (e.me) { phys.place(s, lane); phys.ps = null; q = s - K.LINE; sPrev = phys.loc.s; camYaw = phys.psi; }
+    });
+  }
+  var gridLamps = document.querySelectorAll('#gridLights i');
+  function beginGrid() { gridHold = true; readyMe = false; lightsT = -1; lampsOn = 0; gridSig = ''; $('btnReady').hidden = false; $('gridMsg').textContent = ''; $('grid').hidden = false; for (var i = 0; i < 5; i++) gridLamps[i].classList.remove('on'); }
+  function endHold(go) {
+    gridHold = false; lightsT = -1; lampsOn = 0; $('grid').hidden = true;
+    if (go) { toast('GO!', 'best'); sound.beep(880, 0.5); }
+  }
+  function setReady() { if (!gridHold || readyMe) return; readyMe = true; $('btnReady').hidden = true; sound.start(); }
+  $('btnReady').addEventListener('click', function () { setReady(); this.blur(); });
+  function holdStep() {
+    if (K.kind === 'oval') { endHold(false); return; }
+    var sig = gridSignature(); if (sig !== gridSig) { gridSig = sig; layoutGrid(); }
+    var waitN = menuWait;
+    for (var id in remotes) { var pr = remotes[id].pres; if (pr && pr.rd === 0) waitN++; }
+    if (readyMe && lightsT < 0 && waitN === 0) lightsT = 0;
+    if (lightsT >= 0) {
+      lightsT += lastDt;
+      var n = Math.min(5, Math.floor(lightsT) + 1);
+      if (n !== lampsOn) { lampsOn = n; for (var i = 0; i < 5; i++) gridLamps[i].classList.toggle('on', i < n); sound.beep(520, 0.18); }
+      if (lightsT >= 5) { endHold(true); return; }
+    }
+    $('gridMsg').textContent = readyMe && lightsT < 0 ? 'Waiting for ' + waitN + ' other player' + (waitN > 1 ? 's' : '') + '…' : '';
+  }
+  var lastDt = 0.016;
+  function startDrive() {
+    var first = state === 'menu';
+    if (first) { if (K.kind === 'oval' && slot > 0) gridPlace(slot); joinedAt = Date.now(); }
+    state = 'drive'; $('menu').hidden = true; $('pause').hidden = true; hud.hidden = false; sound.start();
+    if (first && K.kind !== 'oval') beginGrid();
+  }
   function pause() {
     if (state !== 'drive') return;
     state = 'pause'; keys = {}; sound.silence();
@@ -669,6 +723,7 @@
     this.textContent = 'Best lap cleared'; $('pBest').textContent = fmt(null);
   });
   function toMenu() {
+    gridHold = false; $('grid').hidden = true;
     state = 'menu'; keys = {}; sound.silence(); resetRun(); // everyone, AI included, goes back to the starting positions
     $('pause').hidden = true; hud.hidden = true; $('menu').hidden = false;
   }
@@ -729,13 +784,14 @@
       return;
     }
     if (state === 'pause') { if (c === 'Escape' || c === 'KeyP') resume(); return; }
+    if (gridHold && (c === 'Enter' || c === 'NumpadEnter')) { setReady(); return; }
     sound.start();
     keys[c] = true;
     if (c === 'Escape' || c === 'KeyP') pause();
     else if (c === 'KeyC') { camMode = camMode === 'chase' ? 'driver' : camMode === 'driver' ? 'hood' : 'chase'; hCam.textContent = CAM_NAMES[camMode]; } // chase -> driver's seat -> on the hood
     else if (c === 'KeyH') sound.horn();
     else if (c === 'KeyG') { ghostOn = !ghostOn; toast(ghostOn ? 'Ghost on' : 'Ghost off'); }
-    else if (c === 'KeyR') resetCar();
+    else if (c === 'KeyR') { if (!gridHold) resetCar(); }
     else if (c === 'ShiftLeft' || c === 'ShiftRight') onShift();
   });
   window.addEventListener('keyup', function (e) { keys[e.code] = false; });
@@ -763,6 +819,7 @@
     else toast('Lap ' + fmt(t) + '  +' + (t - save.best).toFixed(2));
   }
   function simulate(dt) {
+    if (gridHold) { lastDt = dt; holdStep(); return; } // on the grid: nothing moves until the lights go out
     inp.thr = !!(keys.KeyW || keys.ArrowUp); inp.brk = !!(keys.KeyS || keys.ArrowDown); inp.hand = !!keys.Space; inp.boost = !!(keys.ShiftLeft || keys.ShiftRight);
     inp.steer = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0);
     if (finished) { inp.thr = false; inp.brk = true; inp.boost = false; inp.steer = 0; endT -= dt; if (endT <= 0) { toMenu(); return; } } // over the line: the car stops, then the start screen

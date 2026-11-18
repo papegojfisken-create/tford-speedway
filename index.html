@@ -37,6 +37,13 @@
 </div>
 <div id="toast" hidden></div>
 
+<!-- start grid at Spa: everyone presses Ready, then five lights come on one second apart and go out -->
+<div id="grid" hidden>
+  <div id="gridLights" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+  <button type="button" id="btnReady">I'M READY</button>
+  <div id="gridMsg" role="status"></div>
+</div>
+
 <!-- start screen -->
 <div id="menu" class="overlay">
   <button type="button" id="btnSettings" class="settings-btn" aria-haspopup="dialog">
