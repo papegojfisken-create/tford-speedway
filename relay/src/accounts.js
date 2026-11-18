@@ -5,6 +5,8 @@
 const ITER = 60000;                       // how many rounds of hashing; slow on purpose so guessing passwords is expensive
 const TOKEN_DAYS = 30, MAX_TOKENS = 5, MAX_DATA = 1000000, CHUNK = 100000;
 const NAME_RE = /^[A-Za-z0-9_]{3,20}$/;
+const BOARDS = { 'classic:tford': 1, 'spa:gt3': 1, 'spa:lmp1': 1 }; // circuit:car class
+const MIN_LAP = 15, MAX_LAP = 900;      // seconds; anything outside this is not a real lap
 
 function json(obj, status = 200) { return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } }); }
 const err = (code, status = 400) => json({ err: code }, status);
@@ -95,6 +97,32 @@ export async function handleAuth(storage, request, ip) {
       await writeData(storage, who.lower, b.data);
       return json({ ok: 1 });
     }
+  }
+
+  // Global leaderboards: one list per car class on its circuit (the best lap of each player; top 100 kept).
+  if (path === '/auth/board' && get) {
+    const q = new URL(request.url).searchParams, key = q.get('track') + ':' + q.get('veh');
+    if (!BOARDS[key]) return err('bad-board');
+    const rows = (await storage.get('lb:' + key)) || [];
+    return json({ ok: 1, rows: rows.slice(0, 50).map((r) => ({ n: r.n, t: r.t })) });
+  }
+  if (path === '/auth/lap' && post) {
+    const who = await userFromToken(storage, request);
+    if (!who) return err('auth', 401);
+    let b; try { b = await request.json(); } catch (e) { return err('bad-request'); }
+    const key = b.track + ':' + b.veh;
+    if (!BOARDS[key] || typeof b.t !== 'number' || !(b.t >= MIN_LAP && b.t <= MAX_LAP)) return err('bad-lap');
+    const t = Math.round(b.t * 100) / 100, bk = 'lb:' + key, rows = (await storage.get(bk)) || [];
+    const mine = rows.findIndex((r) => r.u === who.lower);
+    if (mine < 0 || t < rows[mine].t) {
+      const user = await storage.get('u:' + who.lower);
+      if (mine >= 0) rows.splice(mine, 1);
+      rows.push({ u: who.lower, n: user ? user.name : who.lower, t });
+      rows.sort((a, c) => a.t - c.t);
+      if (rows.length > 100) rows.length = 100;
+      await storage.put(bk, rows);
+    }
+    return json({ ok: 1, rank: rows.findIndex((r) => r.u === who.lower) + 1 });
   }
 
   if (path === '/auth/logout' && post) {

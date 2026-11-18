@@ -21,9 +21,11 @@ function readAcc(i) {
   var dv = new DataView(bin); for (var k = 0; k < a.count; k++) for (var c = 0; c < n; c++) { var o = off + k * stride + c * C.BYTES_PER_ELEMENT; out[k * n + c] = C === Float32Array ? dv.getFloat32(o, true) : C === Uint16Array ? dv.getUint16(o, true) : C === Uint32Array ? dv.getUint32(o, true) : dv.getUint8(o); }
   return out;
 }
-lab.load = async function () {
-  gltf = await (await fetch('../models/porsche963/scene.gltf')).json();
-  bin = await (await fetch('../models/porsche963/scene.bin')).arrayBuffer();
+lab.load = async function (dir, len) {
+  dir = dir || 'porsche963';
+  gltf = await (await fetch('../models/' + dir + '/scene.gltf')).json();
+  bin = await (await fetch('../models/' + dir + '/' + gltf.buffers[0].uri)).arrayBuffer();
+  prims.length = 0;
   var m4 = new T.Matrix4(), cache = {};
   function visit(ni, parent) {
     var nd = gltf.nodes[ni], local = new T.Matrix4();
@@ -42,6 +44,11 @@ lab.load = async function () {
   }
   gltf.scenes[gltf.scene || 0].nodes.forEach(function (n) { visit(n, new T.Matrix4()); });
   var bb = new T.Box3(); prims.forEach(function (p) { for (var i = 0; i < p.pos.length; i += 3) bb.expandByPoint(new T.Vector3(p.pos[i], p.pos[i + 1], p.pos[i + 2])); });
+  if (len) { // some models come in odd units: scale everything so the car's longest side (x or z) is `len` metres
+    var sc = len / Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z);
+    prims.forEach(function (p) { for (var i = 0; i < p.pos.length; i++) p.pos[i] *= sc; });
+    bb.min.multiplyScalar(sc); bb.max.multiplyScalar(sc); lab.scaled = sc;
+  }
   lab.bbox = [bb.min.toArray(), bb.max.toArray()];
   return prims.length + ' primitives, bbox ' + JSON.stringify(lab.bbox.map(function (a) { return a.map(function (x) { return +x.toFixed(2); }); }));
 };
@@ -61,7 +68,11 @@ lab.show = function (filter, mode) {
 };
 // ---- reducing the model: vertex clustering with a best-fit (quadric) position per cluster, which keeps flat panels and edges sharp ----
 // model space: nose at +z, +y up, x sideways. Game space: nose at +x, -z = left. Shifted so the wheels sit on y = 0 and the axles sit where the game's wheels are.
-function toGame(x, y, z, o, k) { o[k] = z + 0.195; o[k + 1] = y + 0.05; o[k + 2] = -x; }
+lab.OFF = { x: 0.195, y: 0.05 };
+function toGame(x, y, z, o, k) {
+  if (lab.IDENT) { o[k] = x + lab.OFF.x; o[k + 1] = y + lab.OFF.y; o[k + 2] = z; } // the model already faces +x with its driver's side at -z
+  else { o[k] = z + lab.OFF.x; o[k + 1] = y + lab.OFF.y; o[k + 2] = -x; }          // the model faces +z: turn it
+}
 lab.bake = function (list, cell) {
   var cl = new Map(), cp = [], vmap = [], tris = [];
   // 1. clusters
@@ -74,6 +85,11 @@ lab.bake = function (list, cell) {
     }
     for (var t = 0; t < n; t += 3) {
       var ia = p.idx ? p.idx[t] : t, ib = p.idx ? p.idx[t + 1] : t + 1, ic = p.idx ? p.idx[t + 2] : t + 2;
+      if (lab.CUT) { // leave out triangles inside a box (the box is mirrored left/right): used to remove the door mirrors
+        var mx = Math.abs(p.pos[ia * 3] + p.pos[ib * 3] + p.pos[ic * 3]) / 3, my = (p.pos[ia * 3 + 1] + p.pos[ib * 3 + 1] + p.pos[ic * 3 + 1]) / 3, mz = (p.pos[ia * 3 + 2] + p.pos[ib * 3 + 2] + p.pos[ic * 3 + 2]) / 3, cut = false;
+        for (var ci = 0; ci < lab.CUT.length; ci++) { var cb = lab.CUT[ci]; if (mx >= cb.x[0] && mx <= cb.x[1] && my >= cb.y[0] && my <= cb.y[1] && mz >= cb.z[0] && mz <= cb.z[1]) { cut = true; break; } }
+        if (cut) continue;
+      }
       var ax = p.pos[ia * 3], ay = p.pos[ia * 3 + 1], az = p.pos[ia * 3 + 2], bx = p.pos[ib * 3] - ax, by = p.pos[ib * 3 + 1] - ay, bz = p.pos[ib * 3 + 2] - az, ccx = p.pos[ic * 3] - ax, ccy = p.pos[ic * 3 + 1] - ay, ccz = p.pos[ic * 3 + 2] - az;
       var nx = by * ccz - bz * ccy, ny = bz * ccx - bx * ccz, nz = bx * ccy - by * ccx, ar = Math.sqrt(nx * nx + ny * ny + nz * nz); if (ar < 1e-12) continue;
       nx /= ar; ny /= ar; nz /= ar; var d = -(nx * ax + ny * ay + nz * az), w = ar * .5;
@@ -110,6 +126,7 @@ lab.bake = function (list, cell) {
   return { pos: pos, nor: nor, idx: Uint32Array.from(idx), verts: nv, tris: idx.length / 3 };
 };
 lab.roleOf = function (p) {
+  if (lab.ROLE_MAP) return lab.ROLE_MAP[p.id] || null; // a model with an explicit list of which part is what
   if (lab.EXC[p.id]) return null;
   if (p.id === 137) return 'floor'; // the underbody and wheel-arch liners, coarse, in black
   var m = p.mat || '';
@@ -147,11 +164,40 @@ lab.pack = function () {
     if (b.verts > 65535) throw new Error(r + ' has too many vertices');
     out[r] = { p: b64(new Uint8Array(p.buffer)), n: b64(new Uint8Array(n.buffer)), i: b64(new Uint8Array(ix.buffer)), v: b.verts, t: b.tris };
   });
-  var js = '// Porsche 963 LMDh body, reduced from "Porsche 963 LMDh Hypercar" by kilianhoffmann13 (https://sketchfab.com/kilianhoffmann13),\n// licensed CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/). Source: https://sketchfab.com/3d-models/porsche-963-lmdh-hypercar-d786aa263a804254aa92543dda11dba0\n// The mesh was simplified (about 917k triangles down to a few tens of thousands); wheels, interior and underbody were left out. Made by tools/lab963.html.\nwindow.TF = window.TF || {}; TF.P963 = ' + JSON.stringify({ s: S, parts: out }) + ';\n';
+  var P = lab.PACK || { global: 'P963', head: '// Porsche 963 LMDh body, reduced from "Porsche 963 LMDh Hypercar" by kilianhoffmann13 (https://sketchfab.com/kilianhoffmann13),\n// licensed CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/). Source: https://sketchfab.com/3d-models/porsche-963-lmdh-hypercar-d786aa263a804254aa92543dda11dba0\n// The mesh was simplified (about 917k triangles down to a few tens of thousands); wheels, interior and underbody were left out. Made by tools/lab963.html.\n' };
+  var obj = JSON.stringify({ s: S, cfg: lab.CFG || null, parts: out });
+  var js = P.head + 'window.TF = window.TF || {}; ' + (P.key ? 'TF.GT3M = TF.GT3M || {}; TF.GT3M.' + P.key : 'TF.' + P.global) + ' = ' + obj + ';\n';
   return js;
 };
 lab.save = async function (name) {
   var js = lab.pack(); var r = await fetch('/__save?name=' + name, { method: 'POST', body: js }); return r.status + ' ' + js.length + ' chars';
+};
+// ---- finding the wheels automatically: a tyre is a fat disc standing at the side of the car, about 0.6-0.85 m across ----
+lab.wheels = function () {
+  var found = [];
+  lab.prims.forEach(function (p) {
+    var b = lab.bounds(p), dx = b[3] - b[0], dy = b[4] - b[1], dz = b[5] - b[2];
+    if (dy > .55 && dy < .9 && Math.abs(dy - dz) < .08 && dx > .15 && dx < .5 && Math.abs(b[0] + b[3]) / 2 > .55) found.push({ id: p.id, x: (b[0] + b[3]) / 2, y: (b[1] + b[4]) / 2, z: (b[2] + b[5]) / 2, r: dy / 2, bot: b[1], tris: p.tris });
+  });
+  return found;
+};
+// every part that sits inside one of the wheels' boxes (tyre, rim, disc, caliper...)
+lab.wheelParts = function () {
+  var w = lab.wheels(), ids = {};
+  lab.prims.forEach(function (p) {
+    var b = lab.bounds(p); if (b[3] - b[0] > .6) return;
+    w.forEach(function (c) { var r = c.r + .06; if (Math.abs((b[0] + b[3]) / 2 - c.x) < .3 && b[2] > c.z - r && b[5] < c.z + r && b[1] > c.y - r && b[4] < c.y + r) ids[p.id] = 1; });
+  });
+  return Object.keys(ids).map(Number);
+};
+// one call to load a model, pick its parts, reduce it and save js/<file>
+lab.run = async function (s) {
+  await lab.load(s.dir, s.len);
+  lab.OFF = s.off; lab.IDENT = !!s.ident; lab.ROLE_MAP = s.roles; lab.CUT = s.cut || null; lab.CFG = s.cfg || null;
+  lab.PACK = { key: s.key, head: '// ' + s.title + ' body (' + s.bodyName + '), reduced from "' + s.title + '" by ' + s.author + ' (' + s.authorUrl + '),\n// licensed ' + s.license + '. Source: ' + s.source + '\n// The mesh was simplified; wheels, interior and mirrors were left out (' + s.notes + '). Made by tools/lab963.html.\n' };
+  var r = lab.build(s.cells || { paint: .03, black: .035, glass: .05, light: .04, tail: .04, floor: .09 });
+  var res = await lab.save(s.file);
+  lab.showBaked(); return r + ' | ' + res;
 };
 lab.cam = function (px, py, pz, lx, ly, lz) { cam.position.set(px, py, pz); cam.lookAt(lx, ly, lz); renderer.render(scene, cam); };
 </script>

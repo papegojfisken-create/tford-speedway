@@ -115,7 +115,7 @@
     });
   }
   function makeAi(veh, k) {
-    var sp = aiTraits(veh, k), colIdx = (k + 1 + (veh === 'lmp1' ? 2 : 0)) % COLORS.length, mesh = TF.buildVehicle(veh, palette(veh)[colIdx][1], false, sp.num);
+    var sp = aiTraits(veh, k), colIdx = (k + 1 + (veh === 'lmp1' ? 2 : 0)) % COLORS.length, mesh = TF.buildVehicle(veh, palette(veh)[colIdx][1], false, sp.num, true);
     var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); dot.setAttribute('r', String(8 * mapSc)); dot.setAttribute('fill', veh === 'lmp1' ? '#f2b705' : '#fff8ea'); dot.setAttribute('opacity', '.85');
     mapSvg.insertBefore(dot, $('mapGhost'));
     var a = { veh: veh, k: k, basePace: sp.pace, col: colIdx, num: sp.num, mesh: mesh, body: mesh.userData.body, phys: new TF.Physics(world.colliders), spin: 0, spec: sp, lane: sp.lane, stuck: 0, dot: dot, flT: -1, prof: profileFor(veh), inp: { thr: false, brk: false, hand: false, steer: 0, boost: false } };
@@ -435,7 +435,7 @@
   }
 
   // ---------- game state ----------
-  var state = 'menu', camMode = 'chase', ghostOn = true, time = 0;
+  var state = 'menu', camMode = 'chase', ghostOn = true, time = 0, CAM_NAMES = { chase: 'CHASE CAM', driver: "DRIVER'S SEAT", hood: 'HOOD CAM' };
   var keys = {}, inp = { thr: false, brk: false, hand: false, steer: 0 };
   var q, sPrev, lap, lapT, lapValid, lapsDone = 0, rec, gp = 0, gap = null, wrongT = 0, exT = 0, spin = 0, camYaw = 0, flag = '';
   var raceCount = 0, raceT = 0, finished = false, endT = 0; // the race: laps finished, total time, and the pause on the finish before the start screen
@@ -482,6 +482,7 @@
   }
   buildMap();
   function toast(text, cls) { toastEl.textContent = text; toastEl.className = cls || ''; toastEl.hidden = false; toastT = 2.6; }
+  TF.toast = toast;
   // ---------- leaderboards ----------
   // every car keeps a running distance (phys.pg): metres past the start line, growing lap after lap
   var lbClass = $('lbClass'), lbAll = $('lbAll'), lbT = 0, hLapNow = $('hLapNow'), hLapOf = $('hLapOf');
@@ -540,7 +541,7 @@
     if (gap == null) { hGap.textContent = '--'; hGap.className = 'v ghost'; }
     else { hGap.textContent = (gap >= 0 ? '+' : '-') + Math.abs(gap).toFixed(2); hGap.className = 'v ' + (gap <= 0 ? 'ahead' : 'behind'); }
     if (hFlag.textContent !== flag) hFlag.textContent = flag;
-    var camTxt = keys.KeyB ? 'REAR VIEW' : camMode === 'chase' ? 'CHASE CAM' : "DRIVER'S SEAT";
+    var camTxt = keys.KeyB && camMode === 'chase' ? 'REAR VIEW' : CAM_NAMES[camMode];
     if (hCam.textContent !== camTxt) hCam.textContent = camTxt;
     // boost energy bar (LMP1 only)
     var hasBoost = phys.cfg.boost; if (hBoost.hidden === hasBoost) hBoost.hidden = !hasBoost;
@@ -731,7 +732,7 @@
     sound.start();
     keys[c] = true;
     if (c === 'Escape' || c === 'KeyP') pause();
-    else if (c === 'KeyC') { camMode = camMode === 'chase' ? 'driver' : 'chase'; hCam.textContent = camMode === 'chase' ? 'CHASE CAM' : "DRIVER'S SEAT"; }
+    else if (c === 'KeyC') { camMode = camMode === 'chase' ? 'driver' : camMode === 'driver' ? 'hood' : 'chase'; hCam.textContent = CAM_NAMES[camMode]; } // chase -> driver's seat -> on the hood
     else if (c === 'KeyH') sound.horn();
     else if (c === 'KeyG') { ghostOn = !ghostOn; toast(ghostOn ? 'Ghost on' : 'Ghost off'); }
     else if (c === 'KeyR') resetCar();
@@ -756,6 +757,7 @@
     lapsDone++;
     if (!lapValid) { toast('Lap ' + fmt(t) + ' not counted'); return; }
     if (!ownTrack()) { toast('Lap ' + fmt(t)); return; } // another player's circuit: no records
+    if (TF.account && (save.best == null || t < save.best)) TF.account.lap(K.id, myVeh, t); // a new personal best also goes to the global leaderboard
     if (myVeh === 'gt3' && !save.lmpOk && t < LMP_UNLOCK) { save.lmpOk = true; persist(); updateVehicleUi(); toast('LMP1 unlocked! ' + fmt(t), 'best'); if (save.best == null || t < save.best) { save.best = t; save.ghost = packRec(rec); persist(); buildGhostLine(); } return; }
     if (save.best == null || t < save.best) { save.best = t; save.ghost = packRec(rec); persist(); buildGhostLine(); toast('New best lap ' + fmt(t), 'best'); }
     else toast('Lap ' + fmt(t) + '  +' + (t - save.best).toFixed(2));
@@ -925,6 +927,13 @@
       cam.fov = 62; cam.near = 0.3; cam.up.set(0, 1, 0);
       cam.position.set(phys.x + bf * 0.3, phys.loc.y + cb.up - 0.6, phys.z + bz * 0.3);
       cam.lookAt(phys.x - bf * 25, phys.loc.y + 0.9, phys.z - bz * 25);
+    } else if (camMode === 'hood') {
+      // on the bonnet, a little above it, looking straight down the road (the car can give its own spot; otherwise a place ahead of the seat)
+      var hp = car.userData.hood || [phys.cfg.eye[0] + 1.5, phys.cfg.eye[1] - 0.2, 0];
+      cam.fov = 72; cam.near = 0.1;
+      cam.position.copy(body.localToWorld(tmpV.set(hp[0], hp[1], hp[2])));
+      eul.set(phys.cfg.eyePitch * .5, lookBack ? Math.PI / 2 : -Math.PI / 2, 0);
+      cam.quaternion.copy(body.getWorldQuaternion(tmpQ)).multiply(lookQ.setFromEuler(eul));
     } else if (camMode === 'driver') {
       var ey = car.userData.eye || phys.cfg.eye; // a model can give its own seat position
       cam.fov = 66; cam.near = 0.1;

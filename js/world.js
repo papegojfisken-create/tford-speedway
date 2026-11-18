@@ -66,7 +66,13 @@
     }
 
     // ground and distant hills never change
-    var ground = new T.Mesh(new T.PlaneGeometry(6000, 6000), std({ color: 0x55683a, roughness: 1 }));
+    // grass: soft patches of different greens with fine blades, and mowing stripes, repeated over the whole plane
+    var grassTex = canvasTex(256, 256, function (x, w, h) { // one even grass colour; only the faintest grain so it does not look like plastic
+      x.fillStyle = '#5a6e3c'; x.fillRect(0, 0, w, h);
+      var rs = 11; function rr() { rs = (rs * 16807) % 2147483647; return rs / 2147483647; }
+      for (var j = 0; j < 2500; j++) { x.fillStyle = rr() < .5 ? 'rgba(0,0,0,.035)' : 'rgba(255,255,255,.03)'; x.fillRect(rr() * w, rr() * h, 1, 2); }
+    }, 1200, 1200);
+    var ground = new T.Mesh(new T.PlaneGeometry(6000, 6000), std({ map: grassTex, roughness: 1 }));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.06; ground.receiveShadow = true; scene.add(ground);
     seed = 7;
     var hillM = std({ color: 0x4e5a4a, roughness: 1 }), hills = new T.Group(); scene.add(hills); // the stadium's hills; the big circuit makes its own
@@ -112,14 +118,32 @@
 
       var asphalt = canvasTex(512, 512, function (x, w, h) {
         x.fillStyle = '#48484b'; x.fillRect(0, 0, w, h);
-        for (var i = 0; i < 14000; i++) { x.fillStyle = rnd() < .5 ? 'rgba(0,0,0,.14)' : 'rgba(255,255,255,.07)'; x.fillRect(rnd() * w, rnd() * h, 1.5, 1.5); }
+        for (var pa = 0; pa < 5; pa++) { x.fillStyle = rnd() < .5 ? 'rgba(0,0,0,.09)' : 'rgba(255,255,255,.045)'; x.fillRect(rnd() * w * .6, rnd() * h * .8, w * (.2 + rnd() * .4), h * (.1 + rnd() * .2)); } // repaired patches of slightly different tarmac
+        for (var i = 0; i < 16000; i++) { x.fillStyle = rnd() < .5 ? 'rgba(0,0,0,.16)' : 'rgba(255,255,255,.08)'; x.fillRect(rnd() * w, rnd() * h, 1.5, 1.5); }
         var g = x.createLinearGradient(0, 0, w, 0);
         g.addColorStop(.18, 'rgba(0,0,0,0)'); g.addColorStop(.42, 'rgba(0,0,0,.3)'); g.addColorStop(.62, 'rgba(0,0,0,.3)'); g.addColorStop(.88, 'rgba(0,0,0,0)');
         x.fillStyle = g; x.fillRect(0, 0, w, h);
+        x.fillStyle = 'rgba(8,8,10,.4)'; x.fillRect(0, 0, w, 2); x.fillStyle = 'rgba(8,8,10,.14)'; x.fillRect(w * .5 - 1, 0, 2, h); // a paving joint across the road and a seam down the middle
+        for (var cr = 0; cr < 6; cr++) { x.strokeStyle = 'rgba(10,10,12,.35)'; x.lineWidth = 1; x.beginPath(); var cx = rnd() * w, cy = rnd() * h; x.moveTo(cx, cy); x.lineTo(cx + (rnd() - .5) * 60, cy + (rnd() - .5) * 60); x.stroke(); } // hairline cracks
       });
       band(-HW, HW, 0, std({ map: asphalt, roughness: .92 }));
       band(-6.85, -6.6, 0.015, paintMat({ color: 0xf1ecdf }));
       band(6.6, 6.85, 0.015, paintMat({ color: 0xf1ecdf }));
+      if (K.kind !== 'oval') {
+        // the racing line: rubber laid down by the cars makes the ideal line darker and smoother than the rest of the road
+        var rubber = canvasTex(64, 8, function (x, w, h) { var g = x.createLinearGradient(0, 0, w, 0); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.5, 'rgba(0,0,0,.34)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); });
+        var rubberM = new T.MeshBasicMaterial({ map: rubber, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+        band(function (s) { return K.lineOffset(s) - 1.6; }, function (s) { return K.lineOffset(s) + 1.6; }, 0.01, rubberM, 0, LAP, Math.round(LAP / 2), 1 / 30);
+        // painted start grid: a box for every starting place, in rows of two
+        var gridM = paintMat({ color: 0xf1ecdf });
+        for (var gr = -8; gr < 17; gr++) {
+          var gs = K.START + 8 * gr + 1.2;
+          [-3, 3].forEach(function (gd) {
+            band(gd - 1.4, gd + 1.4, 0.02, gridM, gs - .1, gs + .1, 2, 1);                      // the line across the front of the box
+            band(gd - 1.4, gd - 1.25, 0.02, gridM, gs - 4.8, gs, 2, 1); band(gd + 1.25, gd + 1.4, 0.02, gridM, gs - 4.8, gs, 2, 1); // its two sides
+          });
+        }
+      }
 
       // gravel traps and red-and-white kerbs at the slow corners
       var gravelTex = canvasTex(256, 256, function (x, w, h) {
@@ -222,12 +246,53 @@
         colliders.push([-13 - 1, 53 + 1, 22.75 - 1, 33.25 + 1], [43.8 - 1, 46.2 + 1, -16.2 - 1, -13.8 + 1]);
       } else {
         // ---------- an open circuit: barriers on both sides, earth banks under the banking, grandstand, forest ----------
+        // armco: two rails of corrugated steel on posts (the texture is see-through between the posts and rails)
+        var armcoTex = canvasTex(64, 128, function (x, w, h) {
+          x.clearRect(0, 0, w, h);
+          x.fillStyle = '#6d7075'; x.fillRect(0, 0, 40, 8); x.fillRect(0, h / 2, 40, 8);            // posts (every 4 m: the texture repeats along the road)
+          [[24, 40], [44, 62]].forEach(function (r) {                                                // lower and upper rail
+            var g = x.createLinearGradient(r[0], 0, r[1], 0); g.addColorStop(0, '#8d9298'); g.addColorStop(.5, '#e3e6ea'); g.addColorStop(1, '#9ca1a8');
+            x.fillStyle = g; x.fillRect(r[0], 0, r[1] - r[0], h);
+            x.fillStyle = 'rgba(40,44,50,.5)'; x.fillRect(r[0], 0, r[1] - r[0], 1); x.fillRect(r[0], h / 2, r[1] - r[0], 1);
+            x.fillStyle = 'rgba(30,32,36,.8)'; for (var b = 8; b < h; b += 64) x.fillRect(r[0] + 6, b, 3, 3); // bolts
+          });
+        }, 1, 1);
+        var armcoM = std({ map: armcoTex, roughness: .5, metalness: .4, side: T.DoubleSide, alphaTest: .5, transparent: false });
+        // advertising boards along the barrier: a few fictional brands, with gaps between them
+        var adTex = canvasTex(128, 1024, function (x, w, h) {
+          x.clearRect(0, 0, w, h);
+          var ads = [['T-FORD', '#c8102e', '#ffffff'], ['TURBO OIL', '#f2b705', '#1b1b1b'], ['SPA RACING', '#1c4fd1', '#ffffff'], ['GT3 CUP', '#1d6b4a', '#f4f4f2']];
+          ads.forEach(function (a, i) {
+            x.save(); x.translate(0, i * 256 + 6); x.rotate(Math.PI / 2);
+            x.fillStyle = a[1]; x.fillRect(0, -w, 154, w); x.fillStyle = 'rgba(255,255,255,.18)'; x.fillRect(0, -w, 154, 6);
+            x.fillStyle = a[2]; x.font = 'bold 30px Arial,sans-serif'; x.textAlign = 'center'; x.textBaseline = 'middle'; x.fillText(a[0], 77, -w / 2 + 2);
+            x.restore();
+          });
+        }, 1, 1);
+        var adM = std({ map: adTex, roughness: .7, side: T.DoubleSide, alphaTest: .5 });
+        var nearStart = function (s) { var d = Math.abs(K.wrap(s - K.START)); return d < 450; }; // concrete wall along the pit straight, armco everywhere else
         [-1, 1].forEach(function (side) {
           var at = function (h) { return function (s) { return K.pos(s, side * K.barrierDist(s, side), h); }; };
-          var n = Math.round(LAP / 1.5);
-          var w = new T.Mesh(strip(0, LAP, n, at(-0.3), at(1.15), 1 / 6), wallM); w.castShadow = true; w.receiveShadow = true; scene.add(w);
+          var atIn = function (h) { return function (s) { return K.pos(s, side * (K.barrierDist(s, side) - .1), h); }; };
+          var n = Math.round(LAP / 1.5), sA = K.START - 450, sB = K.START + 450;
+          var w = new T.Mesh(strip(sA, sB, Math.round(900 / 1.5), at(-0.3), at(1.15), 1 / 6), wallM); w.castShadow = true; w.receiveShadow = true; scene.add(w);
+          var arm = new T.Mesh(strip(sB, sA + LAP, Math.round((LAP - 900) / 1.5), at(-0.05), at(0.85), 1 / 8), armcoM); arm.castShadow = true; arm.receiveShadow = true; scene.add(arm);
           scene.add(new T.Mesh(strip(0, LAP, n, at(1.15), at(5.2), 1 / 3.5), fenceM));
+          scene.add(new T.Mesh(strip(0, LAP, Math.round(LAP / 1.5), atIn(1.0), atIn(1.9), side > 0 ? -1 / 128 : 1 / 128), adM)); // ad boards (the texture runs against the direction of travel on the right so it reads left to right from the car)
         });
+        // tyre stacks on the outside of the corner exits, in red, white and black
+        var tyreGeo = new T.CylinderGeometry(.36, .36, .55, 12), tyreStacks = [];
+        K.corners.forEach(function (c, ci) {
+          if (ci % 3 === 2) return;
+          var out = -c.side; // the outside of the corner
+          for (var ts2 = c.s1 - 10; ts2 < c.s1 + 55; ts2 += 1.3) { var dd = K.barrierDist(ts2, out) - .55; if (dd > 3) tyreStacks.push([ts2, out * dd]); }
+        });
+        var tyres = new T.InstancedMesh(tyreGeo, std({ color: 0xffffff, roughness: .95 }), tyreStacks.length * 2), tcol = [0x1a1a1c, 0xe6e6e6, 0xb3201a], td = new T.Object3D(), tcn = 0;
+        tyreStacks.forEach(function (ts3, k) {
+          var tp3 = K.pos(ts3[0], ts3[1], 0), tc = new T.Color(tcol[(k >> 2) % 3 === 2 ? 2 : (k >> 1) % 2 ? 0 : 1]);
+          for (var lv = 0; lv < 2; lv++) { td.position.set(tp3.x, .28 + lv * .56, tp3.z); td.rotation.set(0, k * 1.7, 0); td.updateMatrix(); tyres.setMatrixAt(tcn, td.matrix); tyres.setColorAt(tcn, tc); tcn++; }
+        });
+        tyres.count = tcn; tyres.castShadow = true; scene.add(tyres);
         // under the high side of banked corners: an earth bank from the top edge down to the ground, so the banking is not floating
         var bankM = std({ color: 0x4a5a35, roughness: 1, side: T.DoubleSide });
         var edge = function (s) { var t = K.tp(s), side = t.b >= 0 ? 1 : -1; return K.pos(s, side * (HW + 0.6), -0.3); };
@@ -269,15 +334,54 @@
           }
           return false;
         };
-        var treeN = Math.round(LAP / 4), trees = new T.InstancedMesh(new T.ConeGeometry(4.5, 14, 7), std({ color: 0x2c4326, roughness: 1 }), treeN), dm = new T.Object3D(), placed = 0;
-        for (var tries = 0; tries < treeN * 6 && placed < treeN; tries++) {
-          var ts = rnd() * LAP, tside = rnd() < .5 ? -1 : 1, off = 26 + rnd() * 80, tpnt = K.pos(ts, tside * off, 0);
-          if (nearTrack(tpnt.x, tpnt.z, 26)) continue;                                          // too close to some part of the track
-          if (tside > 0 && Math.hypot(tpnt.x - p0.x, tpnt.z - p0.z) < 220) continue;            // keep clear of the grandstand
-          var sc = .7 + rnd() * 1.2;
-          dm.position.set(tpnt.x, 7 * sc, tpnt.z); dm.scale.set(sc, sc, sc); dm.rotation.y = rnd() * 3; dm.updateMatrix(); trees.setMatrixAt(placed++, dm.matrix);
+        // grandstands behind the barriers: on the outside of every other corner and at a few places along the straights.
+        // A stand is a block of crowd tiers rising away from the track, a concrete back wall and a roof.
+        var standSpots = [], standCm = std({ map: crowd, roughness: .9 });
+        var farFromTrack = function (px, pz, s0) { // no other stretch of the circuit close by
+          for (var ci2 = 0; ci2 < K.N; ci2 += 4) {
+            var ds2 = Math.abs(ci2 * LAP / K.N - s0); if (ds2 > LAP / 2) ds2 = LAP - ds2;
+            if (ds2 > 140 && Math.hypot(px - raw.PX[ci2], pz - raw.PZ[ci2]) < 50) return false;
+          }
+          return true;
+        };
+        var buildStand = function (s0, side, len, rows) {
+          var t0 = K.tp(s0), z0 = K.barrierDist(s0, side) + 6, ctr = K.pos(s0, side * (z0 + rows * .9), 0);
+          if (!farFromTrack(ctr.x, ctr.z, s0)) return;
+          var sg = new T.Group(); sg.position.set(t0.x, 0, t0.z); sg.rotation.y = Math.atan2(-t0.tz, t0.tx); scene.add(sg);
+          var sb = function (w, h, d, mat, x, y, z, sh) { var m = new T.Mesh(new T.BoxGeometry(w, h, d), mat); m.position.set(x, y, z); m.castShadow = sh !== false; m.receiveShadow = true; sg.add(m); return m; };
+          var shd = side > 0; // the low sun is on the left: stands on that side cast no shadow, so the road stays sunlit
+          for (var r = 0; r < rows; r++) { var rh = 1.0 + r * .85; sb(len, rh, 1.6, standCm, 0, rh / 2, side * (z0 + r * 1.6), shd); }
+          var back = z0 + rows * 1.6 + .8, top = 1.0 + rows * .85 + 3.5;
+          sb(len, top, .8, concrete, 0, top / 2, side * back, shd);
+          var rf = sb(len + 3, .35, rows * 1.6 + 4, roofM, 0, top + .3, side * (back - rows * .8 - .5), shd); rf.rotation.x = side * .06;
+          for (var pp = -len / 2; pp <= len / 2; pp += len / 4) sb(.4, top - 2.5, .4, concrete, pp, (top - 2.5) / 2, side * (back - .6), shd); // roof posts
+          standSpots.push({ x: ctr.x, z: ctr.z });
+        };
+        K.corners.forEach(function (c, ci) { if (ci % 2 === 0) buildStand((c.s0 + c.s1) / 2, -c.side, 70 + (ci % 3) * 10, 6 + (ci % 3)); });
+        [.17, .33, .52, .68, .85].forEach(function (f, fi) { buildStand(f * LAP, fi % 2 ? 1 : -1, 90, 7); });
+        var nearStand = function (px, pz) { for (var q2 = 0; q2 < standSpots.length; q2++) if (Math.hypot(px - standSpots[q2].x, pz - standSpots[q2].z) < 55) return true; return false; };
+
+        // spruce trees: a trunk and two tiers of branches, in several shades of green, close behind the barriers and thinning out with distance
+        var treeN = Math.round(LAP / 2.6), treeMat = std({ color: 0xffffff, roughness: 1 });
+        var trunks = new T.InstancedMesh(new T.CylinderGeometry(.35, .55, 3.2, 6), std({ color: 0x4a3626, roughness: 1 }), treeN);
+        var tier1 = new T.InstancedMesh(new T.ConeGeometry(4.4, 8.5, 8), treeMat, treeN), tier2 = new T.InstancedMesh(new T.ConeGeometry(3.0, 7.5, 8), treeMat, treeN);
+        var dm = new T.Object3D(), placed = 0, greens = [0x23452a, 0x2b5030, 0x1d3d25, 0x34602f, 0x2a4a2b, 0x3f6a38];
+        var setPart = function (mesh, i, x, y, z, sc, ry, col) { dm.position.set(x, y, z); dm.scale.set(sc, sc, sc); dm.rotation.set(0, ry, 0); dm.updateMatrix(); mesh.setMatrixAt(i, dm.matrix); if (col) mesh.setColorAt(i, col); };
+        for (var tries = 0; tries < treeN * 8 && placed < treeN; tries++) {
+          var ts = rnd() * LAP, tside = rnd() < .5 ? -1 : 1, off = 12 + Math.pow(rnd(), 1.6) * 110, bd = K.barrierDist(ts, tside);
+          if (off < bd + 6) continue;                                                              // not in the run-off area
+          var tpnt = K.pos(ts, tside * off, 0);
+          if (nearTrack(tpnt.x, tpnt.z, 16)) continue;                                             // too close to some other part of the track
+          if (nearStand(tpnt.x, tpnt.z)) continue;                                                  // keep clear of the grandstands
+          if (tside > 0 && Math.hypot(tpnt.x - p0.x, tpnt.z - p0.z) < 200) continue;               // keep clear of the grandstand
+          if (tside < 0 && Math.hypot(tpnt.x - p0.x, tpnt.z - p0.z) < 120) continue;
+          var sc = .75 + rnd() * 1.1, ry = rnd() * 6, col = new T.Color(greens[(rnd() * greens.length) | 0]).multiplyScalar(.85 + rnd() * .3);
+          setPart(trunks, placed, tpnt.x, 1.6 * sc, tpnt.z, sc, ry);
+          setPart(tier1, placed, tpnt.x, (3.2 + 3.6) * sc, tpnt.z, sc, ry, col);
+          setPart(tier2, placed, tpnt.x, (3.2 + 8.2) * sc, tpnt.z, sc, ry, col);
+          placed++;
         }
-        trees.count = placed; scene.add(trees);
+        [trunks, tier1, tier2].forEach(function (m) { m.count = placed; m.castShadow = true; scene.add(m); });
 
         // wooded hills all round, well outside the circuit
         var b = K.bounds, hx = (b.minx + b.maxx) / 2, hz = (b.minz + b.maxz) / 2, hrad = Math.hypot(b.maxx - b.minx, b.maxz - b.minz) / 2 + 900, hmat = std({ color: 0x4a5a42, roughness: 1 });

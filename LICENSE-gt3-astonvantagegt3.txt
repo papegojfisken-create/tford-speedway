@@ -1,0 +1,11 @@
+Model Information:
+* title:	Aston Martin Vantage GT3
+* source:	https://sketchfab.com/3d-models/aston-martin-vantage-gt3-fbd3494e950c40ecb536f1335296345d
+* author:	Design Studio Poland (https://sketchfab.com/DesignStudioPoland)
+
+Model License:
+* license type:	CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)
+* requirements:	Author must be credited. Commercial use is allowed.
+
+If you use this 3D model in your project be sure to copy paste this credit wherever you share it:
+This work is based on "Aston Martin Vantage GT3" (https://sketchfab.com/3d-models/aston-martin-vantage-gt3-fbd3494e950c40ecb536f1335296345d) by Design Studio Poland (https://sketchfab.com/DesignStudioPoland) licensed under CC-BY-4.0 (http://creativecommons.org/licenses/by/4.0/)

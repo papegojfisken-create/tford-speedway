@@ -57,13 +57,14 @@
   // fr = front wing end plates and the corners of the nose. Plus the wordmark and the emblem for the nose.
   var K_BLK = 0x0a0a0b, K_RED = 0x800004, K_WHT = 0xf4f4f2, K_PRED = 0xf0001e; // K_PRED: Porsche's bright "Guards" red
   var LIV = {
-    porsche: { f1: K_BLK, f2: K_BLK, f3: K_PRED, ctrO: K_PRED, ctrI: K_BLK, plLo: K_BLK, plHi: K_PRED, fin: K_PRED, fr: K_PRED, word: function () { return TF.porscheDecal('word'); }, ws: [.8, .15], emb: function () { return TF.porscheDecal('crest'); }, es: [.2, .2] },
-    ferrari: { nose3: [0x009246, 0xf4f4f2, 0xce2b37], f1: K_BLK, f2: K_BLK, f3: 0xffd400, fr: 0xffd400, plLo: 0x009246, plHi: 0xce2b37, word: function () { return TF.ferrariDecal('word'); }, ws: [.75, .19], emb: function () { return TF.ferrariDecal('shield'); }, es: [.18, .2] },
-    audi: { f1: 0xc9ccd2, f2: 0xc9ccd2, f3: 0xd0021b, plLo: 0xc9ccd2, plHi: 0xd0021b, fr: 0xd0021b, word: function () { return TF.audiDecal('word'); }, ws: [.8, .15], emb: function () { return TF.audiDecal('rings'); }, es: [.3, .1] },
-    bmw: { f1: 0x81c4ff, f2: 0x16288f, f3: 0xe4002b, ctrO: 0x81c4ff, ctrI: 0x16288f, plLo: 0x16288f, plHi: 0x81c4ff, fr: 0xe4002b, word: function () { return TF.bmwDecal('word'); }, ws: [.8, .15], emb: function () { return TF.bmwDecal('roundel'); }, es: [.2, .2] },
-    mclaren: { f1: K_BLK, f2: K_BLK, f3: K_WHT, ctrI: K_BLK, plLo: K_BLK, plHi: K_WHT, fr: K_BLK, word: function () { return TF.mclarenDecal('word'); }, ws: [.8, .15], emb: function () { return TF.mclarenDecal('speed'); }, es: [.4, .15] },
-    aston: { f1: K_BLK, f2: K_BLK, f3: 0xb8e600, ctrI: 0xb8e600, plLo: K_BLK, plHi: 0xb8e600, fr: 0xb8e600, word: function () { return TF.astonDecal('word'); }, ws: [.8, .15], emb: function () { return TF.astonDecal('wings'); }, es: [.3, .11] }
+    porsche: { slant: .12, flankAll: true, f1: K_BLK, f2: K_BLK, f3: K_PRED, ctrO: K_PRED, ctrI: K_BLK, plLo: K_BLK, plHi: K_PRED, fin: K_PRED, fr: K_PRED, word: function () { return TF.porscheDecal('word'); }, ws: [.8, .15], emb: function () { return TF.porscheDecal('crest'); }, es: [.2, .2] },
+    ferrari: { nose3: [0x009246, 0xf4f4f2, 0xce2b37], roof3: true, flankAll: true, f1: K_BLK, f2: K_BLK, f3: 0xffd400, fr: 0xffd400, plLo: 0x009246, plHi: 0xce2b37, word: function () { return TF.ferrariDecal('word'); }, ws: [.75, .19], emb: function () { return TF.ferrariDecal('shield'); }, es: [.18, .2] },
+    audi: { slant: .06, flankAll: true, ctrO: 0xd0021b, ctrI: 0xc9ccd2, f1: 0xc9ccd2, f2: 0xc9ccd2, f3: 0xd0021b, plLo: 0xc9ccd2, plHi: 0xd0021b, fr: 0xd0021b, word: function () { return TF.audiDecal('word'); }, ws: [.8, .15], emb: function () { return TF.audiDecal('rings'); }, es: [.3, .1] },
+    bmw: { nose3: [0x81c4ff, 0x16288f, 0xe4002b], roof3: true, outline: false, flankAll: true, f1: 0x81c4ff, f2: 0x16288f, f3: 0xe4002b, plLo: 0x16288f, plHi: 0x81c4ff, fr: 0xe4002b, word: function () { return TF.bmwDecal('word'); }, ws: [.8, .15], emb: function () { return TF.bmwDecal('roundel'); }, es: [.2, .2] },
+    mclaren: { roofFill: K_BLK, flankAll: true, f1: K_BLK, f2: K_BLK, f3: K_WHT, ctrO: K_WHT, ctrI: K_BLK, plLo: K_BLK, plHi: K_WHT, fr: K_BLK, word: function () { return TF.mclarenDecal('word'); }, ws: [.8, .15], emb: function () { return TF.mclarenDecal('speed'); }, es: [.4, .15] },
+    aston: { flankAll: true, f1: K_BLK, f2: K_BLK, f3: 0xb8e600, ctrO: 0xb8e600, ctrI: K_BLK, plLo: K_BLK, plHi: 0xb8e600, fr: 0xb8e600, word: function () { return TF.astonDecal('word'); }, ws: [.8, .15], emb: function () { return TF.astonDecal('wings'); }, es: [.3, .11] }
   };
+  TF.LIV = LIV; TF.livV3 = function (h) { return v3(h); }; // the GT3 body uses the same colour table
   function v3(h) { return 'vec3(' + [(h >> 16) & 255, (h >> 8) & 255, h & 255].map(function (x) { return (x / 255).toFixed(3); }).join(',') + ')'; }
   function liveryShader(sp) {
     return function (sh) {
@@ -75,12 +76,13 @@
         'float up = smoothstep(.3, .4, Nn.y);',
         'float nose = up * bnd(P.x, 1.0, 2.5); float roof = up * bnd(P.x, -.9, .95) * smoothstep(.88, .92, P.y);',
         'float plate = bnd(P.x, -3., -1.7) * smoothstep(.83, .87, az); float plow = 1. - smoothstep(.79, .81, P.y);'];
-      if (sp.f1 != null) L.push('lc = mix(lc, ' + v3(sp.f1) + ', flank * bnd(P.y, .3, .37));');
-      if (sp.f2 != null) L.push('lc = mix(lc, ' + v3(sp.f2) + ', flank * bnd(P.y, .37, .43));');
-      if (sp.f3 != null) L.push('lc = mix(lc, ' + v3(sp.f3) + ', flank * bnd(P.y, .43, .49));');
+      L.push('float yy = P.y + ' + (sp.slant || 0).toFixed(3) + ' * P.x;'); // slanted stripes: the bands climb towards the tail
+      if (sp.f1 != null) L.push('lc = mix(lc, ' + v3(sp.f1) + ', flank * bnd(yy, .3, .37));');
+      if (sp.f2 != null) L.push('lc = mix(lc, ' + v3(sp.f2) + ', flank * bnd(yy, .37, .43));');
+      if (sp.f3 != null) L.push('lc = mix(lc, ' + v3(sp.f3) + ', flank * bnd(yy, .43, .49));');
       if (sp.ctrO != null) L.push('lc = mix(lc, ' + v3(sp.ctrO) + ', nose * (1. - smoothstep(.125, .135, az))); lc = mix(lc, ' + v3(sp.ctrO) + ', roof * (1. - smoothstep(.11, .12, az)));');
       if (sp.ctrI != null) L.push('lc = mix(lc, ' + v3(sp.ctrI) + ', nose * (1. - smoothstep(.085, .095, az))); lc = mix(lc, ' + v3(sp.ctrI) + ', roof * (1. - smoothstep(.075, .085, az)));');
-      if (sp.nose3) L.push('lc = mix(lc, ' + v3(sp.nose3[0]) + ', nose * bnd(P.z, -.12, -.04)); lc = mix(lc, ' + v3(sp.nose3[1]) + ', nose * bnd(P.z, -.04, .04)); lc = mix(lc, ' + v3(sp.nose3[2]) + ', nose * bnd(P.z, .04, .12)); lc = mix(lc, vec3(.02), nose * (bnd(P.z, -.13, -.12) + bnd(P.z, .12, .13)));'); // three stripes side by side down the nose
+      if (sp.nose3) L.push('lc = mix(lc, ' + v3(sp.nose3[0]) + ', nose * bnd(P.z, -.12, -.04)); lc = mix(lc, ' + v3(sp.nose3[1]) + ', nose * bnd(P.z, -.04, .04)); lc = mix(lc, ' + v3(sp.nose3[2]) + ', nose * bnd(P.z, .04, .12)); ' + (sp.outline === false ? '' : 'lc = mix(lc, vec3(.02), nose * (bnd(P.z, -.13, -.12) + bnd(P.z, .12, .13)));') + (sp.roof3 ? ' lc = mix(lc, ' + v3(sp.nose3[0]) + ', roof * bnd(P.z, -.12, -.04)); lc = mix(lc, ' + v3(sp.nose3[1]) + ', roof * bnd(P.z, -.04, .04)); lc = mix(lc, ' + v3(sp.nose3[2]) + ', roof * bnd(P.z, .04, .12));' : '')); // three stripes side by side down the nose (and over the roof for BMW)
       if (sp.plLo != null) L.push('lc = mix(lc, ' + v3(sp.plLo) + ', plate * plow);');
       if (sp.plHi != null) L.push('lc = mix(lc, ' + v3(sp.plHi) + ', plate * (1. - plow));');
       if (sp.fin != null) L.push('lc = mix(lc, ' + v3(sp.fin) + ', bnd(P.x, -3., -1.0) * (1. - smoothstep(.055, .065, az)) * smoothstep(.97, .99, P.y));');
@@ -115,7 +117,7 @@
     return best;
   }
 
-  TF.buildLmp1 = function (color, ghost, number) {
+  TF.buildLmp1 = function (color, ghost, number, ai) {
     var std = TF.std, ferrari = !ghost && color === TF.FERRARI, num = String(number == null ? 7 : number), label = num + (ferrari ? 'F' : '');
     var numTex = numTexes[label] || (numTexes[label] = TF.canvasTex(128, 128, function (x) {
       x.fillStyle = ferrari ? '#ffd400' : '#f3efe4'; x.beginPath(); x.arc(64, 64, 62, 0, 7); x.fill();
@@ -377,7 +379,7 @@
       var PG = p963Geos(), roleMat = { paint: paint, black: paint, glass: glass, light: led, tail: tail, red: accent, floor: M({ color: 0xdcdcde, roughness: .5 }) };
       Object.keys(PG).forEach(function (k) {
         var pm = new T.Mesh(PG[k], roleMat[k] || carbon);
-        if (k !== 'glass') { pm.castShadow = true; pm.receiveShadow = true; }
+        if (k !== 'glass') { pm.castShadow = !ai; pm.receiveShadow = true; }
         g.add(pm);
       });
       // the number sits low on the flank just in front of the rear wheel; the wordmark takes the spot by the cockpit; an emblem goes on the nose
@@ -392,7 +394,7 @@
       var em = new T.Mesh(new T.PlaneGeometry(LV.es[0], LV.es[1]).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), emM); em.position.set(2.0, bodyEdgeTop([1.95, 2.05], 0.12) + .006, 0); g.add(em);
     }
 
-    car.userData = { body: g, wheels: wheels, steeringWheel: swi, driver: dr, legs: legs, paint: ghost ? [] : [paint], setFlash: function () { }, setBoost: setBoost, vehicle: 'lmp1', eye: model ? [0.2, 0.9, 0] : null };
+    car.userData = { body: g, wheels: wheels, steeringWheel: swi, driver: dr, legs: legs, paint: ghost ? [] : [paint], setFlash: function () { }, setBoost: setBoost, vehicle: 'lmp1', eye: model ? [0.2, 0.9, 0] : null, hood: model ? [1.25, bodyEdgeTop([1.15, 1.35], .12) + .14, 0] : [1.2, .85, 0] };
     return car;
   };
 })();

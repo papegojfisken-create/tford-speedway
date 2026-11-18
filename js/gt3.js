@@ -6,8 +6,8 @@
   var numTexes = {}, glowTex = null;
 
   // one builder for any vehicle id
-  TF.buildVehicle = function (veh, color, ghost, number) {
-    return veh === 'lmp1' ? TF.buildLmp1(color, ghost, number) : veh === 'gt3' ? TF.buildGt3(color, ghost, number) : TF.buildCar(color, ghost, number);
+  TF.buildVehicle = function (veh, color, ghost, number, ai) { // ai: a computer-driven car; its detailed body does not cast a shadow (saves a lot of drawing)
+    return veh === 'lmp1' ? TF.buildLmp1(color, ghost, number, ai) : veh === 'gt3' ? TF.buildGt3(color, ghost, number, ai) : TF.buildCar(color, ghost, number);
   };
 
   // The white paint is the Porsche one: it also gets the Porsche details (911 front and wing on the GT3, 919 livery on the LMP1)
@@ -130,7 +130,74 @@
     });
   };
 
-  TF.buildGt3 = function (color, ghost, number) {
+  // ---- the 911 GT3 R body (js/p911data.js): decoded once, every GT3 shares the same geometry ----
+  function p911Geos(d) {
+    if (d.geos) return d.geos;
+    function u8(s) { var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
+    d.geos = {};
+    Object.keys(d.parts).forEach(function (k) {
+      var q = d.parts[k], p = new Int16Array(u8(q.p).buffer), n = new Int8Array(u8(q.n).buffer), ix = new Uint16Array(u8(q.i).buffer);
+      var P = new Float32Array(p.length), N = new Float32Array(n.length), i;
+      for (i = 0; i < p.length; i++) P[i] = p[i] / d.s;
+      for (i = 0; i < n.length; i++) N[i] = n[i] / 127;
+      var G = new T.BufferGeometry(); G.setAttribute('position', new T.BufferAttribute(P, 3)); G.setAttribute('normal', new T.BufferAttribute(N, 3)); G.setIndex(new T.BufferAttribute(ix, 1));
+      d.geos[k] = G;
+    });
+    return d.geos;
+  }
+  // the outermost sideways point of the body inside a box, to stick a decal on the flank
+  function flankEdge(d, box, sign) {
+    var P = d.geos.paint.attributes.position.array, best = null;
+    for (var i = 0; i < P.length; i += 3) if (P[i] > box[0] && P[i] < box[1] && P[i + 1] > box[2] && P[i + 1] < box[3] && P[i + 2] * sign > 0) { var a = Math.abs(P[i + 2]); if (best === null || a > best) best = a; }
+    return best;
+  }
+  function topNear(d, xr, zr) {
+    var P = d.geos.paint.attributes.position.array, best = .5;
+    for (var i = 0; i < P.length; i += 3) if (P[i] > xr[0] && P[i] < xr[1] && Math.abs(P[i + 2]) < zr && P[i + 1] > best) best = P[i + 1];
+    return best;
+  }
+  // where the parts of a body are, so the livery fits any of the cars: nose and tail ends and the roof height
+  function bodyZones(d, cfg) {
+    var P = d.geos.paint.attributes.position.array, nose = -9, tail = 9, roof = 0;
+    for (var i = 0; i < P.length; i += 3) {
+      if (P[i] > nose) nose = P[i]; if (P[i] < tail) tail = P[i];
+      if (P[i] > cfg.rx && P[i] < cfg.fx && Math.abs(P[i + 2]) < .35 && P[i + 1] > roof) roof = P[i + 1];
+    }
+    return { nose: nose, tail: tail, roof: roof };
+  }
+  // The livery, drawn per pixel by the graphics card (same colour rules as the prototype, see LIV in lmp1.js; the zones fit this body)
+  function gt3Livery(sp, Z) {
+    var v3 = TF.livV3, f = function (v) { return v.toFixed(3); };
+    return function (sh) {
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\n#include <common>').replace('#include <begin_vertex>', '#include <begin_vertex>\nvOP = position; vON = normal;');
+      var L = ['#include <color_fragment>',
+        'vec3 P = vOP; vec3 Nn = normalize(vON); float az = abs(P.z); vec3 lc = diffuseColor.rgb;',
+        'float flank = smoothstep(.15, .25, abs(Nn.z)) * bnd(P.x, ' + f(Z.fl0) + ', ' + f(Z.fl1) + ') * smoothstep(.8, .86, az);',
+        'float up = smoothstep(.3, .4, Nn.y);',
+        'float hood = up * bnd(P.x, ' + f(Z.hd0) + ', ' + f(Z.hd1) + '); float roof = up * bnd(P.x, ' + f(Z.rf0) + ', ' + f(Z.rf1) + ') * smoothstep(' + f(Z.roofY - .1) + ', ' + f(Z.roofY - .05) + ', P.y);',
+        'float roof0 = up * bnd(P.x, ' + f(Z.rf0 - .1) + ', ' + f(Z.rf1 + .45) + ') * smoothstep(' + f(Z.roofY - .1) + ', ' + f(Z.roofY - .05) + ', P.y);',
+        'float plate = bnd(P.x, ' + f(Z.tail - .1) + ', ' + f(Z.tail + .6) + ') * smoothstep(.83, .88, az) * smoothstep(.65, .7, P.y); float plow = 1. - smoothstep(' + f(Z.roofY - .2) + ', ' + f(Z.roofY - .16) + ', P.y);'];
+      L.push('float yy = P.y + ' + f(sp.slant || 0) + ' * P.x;'); // slanted stripes: the bands climb towards the tail
+      if (sp.roofFill != null) L.push('lc = mix(lc, ' + v3(sp.roofFill) + ', roof0 * (1. - smoothstep(.55, .62, az)));'); // the whole roof panel in one colour
+      if (sp.f1 != null) L.push('lc = mix(lc, ' + v3(sp.f1) + ', flank * bnd(yy, .3, .37));');
+      if (sp.f2 != null) L.push('lc = mix(lc, ' + v3(sp.f2) + ', flank * bnd(yy, .37, .43));');
+      if (sp.f3 != null) L.push('lc = mix(lc, ' + v3(sp.f3) + ', flank * bnd(yy, .43, .49));');
+      if (sp.ctrO != null) L.push('lc = mix(lc, ' + v3(sp.ctrO) + ', hood * (1. - smoothstep(.125, .135, az))); lc = mix(lc, ' + v3(sp.ctrO) + ', roof * (1. - smoothstep(.125, .135, az)));');
+      if (sp.ctrI != null) L.push('lc = mix(lc, ' + v3(sp.ctrI) + ', hood * (1. - smoothstep(.085, .095, az))); lc = mix(lc, ' + v3(sp.ctrI) + ', roof * (1. - smoothstep(.085, .095, az)));');
+      if (sp.nose3) L.push('lc = mix(lc, ' + v3(sp.nose3[0]) + ', hood * bnd(P.z, -.12, -.04)); lc = mix(lc, ' + v3(sp.nose3[1]) + ', hood * bnd(P.z, -.04, .04)); lc = mix(lc, ' + v3(sp.nose3[2]) + ', hood * bnd(P.z, .04, .12)); ' + (sp.outline === false ? '' : 'lc = mix(lc, vec3(.02), hood * (bnd(P.z, -.13, -.12) + bnd(P.z, .12, .13)));') + (sp.roof3 ? ' lc = mix(lc, ' + v3(sp.nose3[0]) + ', roof * bnd(P.z, -.12, -.04)); lc = mix(lc, ' + v3(sp.nose3[1]) + ', roof * bnd(P.z, -.04, .04)); lc = mix(lc, ' + v3(sp.nose3[2]) + ', roof * bnd(P.z, .04, .12));' : ''));
+      if (sp.plLo != null) L.push('lc = mix(lc, ' + v3(sp.plLo) + ', plate * plow);');
+      if (sp.plHi != null) L.push('lc = mix(lc, ' + v3(sp.plHi) + ', plate * (1. - plow));');
+      if (sp.fr != null) L.push('lc = mix(lc, ' + v3(sp.fr) + ', smoothstep(' + f(Z.nose - .25) + ', ' + f(Z.nose - .2) + ', P.x) * smoothstep(.55, .6, az) * (1. - smoothstep(.5, .56, P.y)));');
+      L.push('sm = min(1., dot(abs(lc - diffuseColor.rgb), vec3(1.)) * 4.); diffuseColor.rgb = lc;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', 'varying vec3 vOP; varying vec3 vON;\nfloat sm;\nfloat bnd(float v, float a, float b) { float e = .004; return smoothstep(a - e, a + e, v) * (1. - smoothstep(b - e, b + e, v)); }\n#include <common>')
+        .replace('#include <color_fragment>', L.join('\n'))
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, .6, sm);')
+        .replace('#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\nmetalnessFactor *= (1. - sm);')
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance *= (1. - sm);');
+    };
+  }
+
+  TF.buildGt3 = function (color, ghost, number, ai) {
     var std = TF.std, ferrari = !ghost && color === TF.FERRARI, num = String(number == null ? 7 : number), label = num + (ferrari ? 'F' : '');
     var numTex = numTexes[label] || (numTexes[label] = TF.canvasTex(128, 128, function (x) {
       x.fillStyle = ferrari ? '#ffd400' : '#f3efe4'; x.beginPath(); x.arc(64, 64, 62, 0, 7); x.fill();
@@ -152,6 +219,11 @@
     var bmw = !ghost && color === TF.BMW; if (bmw) accent.color.setHex(0xe4002b);
     var mcl = !ghost && color === TF.MCLAREN; if (mcl) accent.color.setHex(0x15161a);
     var ast = !ghost && color === TF.ASTON; if (ast) accent.color.setHex(TF.LIME);
+    // each paint colour is its own car: the real body of that car (a simplified model) instead of the generated shell; the ghost stays a simple outline
+    var brand = porsche ? 'porsche' : ferrari ? 'ferrari' : audi ? 'audi' : bmw ? 'bmw' : mcl ? 'mclaren' : ast ? 'aston' : 'porsche';
+    var md = ghost ? null : ((TF.GT3M && TF.GT3M[brand]) || (brand === 'porsche' && TF.P911) || null), model = !!md;
+    var cfg = (md && md.cfg) || { fx: 1.28, rx: -1.22, rf: .355, rr: .355, track: .86, eye: [.15, 1.0, -.3], sw: [.3, .76, -.3] }; // (the 911 body needs no settings: these are its numbers)
+    var WR = model ? cfg.rf : .34, WRR = model ? cfg.rr : .34, FX = model ? cfg.fx : 1.38, RX = model ? cfg.rx : -1.32, TRK = model ? cfg.track : .86; // wheel radii, axle positions, track
 
     function add(geo, mat, x, y, z, parent) {
       var m = new T.Mesh(geo, mat); m.position.set(x, y, z);
@@ -178,15 +250,17 @@
     // wheels: dark tyre, dark rim, five silver spokes. Each has a steer group and a spin group.
     var wheels = [];
     function wheel(x, z, front) {
-      var st = new T.Group(); st.position.set(x, .34, z); g.add(st);
+      var R = front ? WR : WRR, st = new T.Group(); st.position.set(x, R, z); g.add(st);
       var w = new T.Group(), tw = front ? .3 : .34; st.add(w);
-      add(cyl(.34, tw, 28).rotateX(Math.PI / 2), rubber, 0, 0, 0, w);
-      add(cyl(.235, tw + .01, 20).rotateX(Math.PI / 2), trim, 0, 0, 0, w);
-      for (var i = 0; i < 5; i++) { var sp = add(box(.055, .22, tw + .02).translate(0, .125, 0), silver, 0, 0, 0, w); sp.rotation.z = i * Math.PI * 2 / 5; }
+      add(cyl(R, tw, 28).rotateX(Math.PI / 2), rubber, 0, 0, 0, w);
+      add(cyl(R * .69, tw + .01, 20).rotateX(Math.PI / 2), trim, 0, 0, 0, w);
+      for (var i = 0; i < 5; i++) { var sp = add(box(.055, R * .65, tw + .02).translate(0, R * .37, 0), silver, 0, 0, 0, w); sp.rotation.z = i * Math.PI * 2 / 5; }
       add(cyl(.05, tw + .03, 10).rotateX(Math.PI / 2), silver, 0, 0, 0, w);
       wheels.push({ steer: st, spin: w, front: front, x: x, z: z });
     }
-    wheel(1.38, -.86, true); wheel(1.38, .86, true); wheel(-1.32, -.86, false); wheel(-1.32, .86, false);
+    wheel(FX, -TRK, true); wheel(FX, TRK, true); wheel(RX, -TRK, false); wheel(RX, TRK, false);
+
+    if (!model) {
 
     // body: nose and hood, tail and rear deck, door panels, floor
     add(prism([[0.6, 0.22], [2.1, 0.22], [2.27, 0.3], [2.3, 0.46], [2.0, 0.66], [1.3, 0.80], [0.62, 0.90], [0.6, 0.90]], 1.68, .09), paint, 0, 0, 0);
@@ -222,20 +296,21 @@
     });
     add(box(.34, .045, 1.72), carbon, -2.27, 1.23, 0).rotation.z = -.1;   // rear wing
     add(box(.2, .03, 1.7), carbon, -2.12, 1.36, 0).rotation.z = -.18;     // upper flap
+    }
     // inside: dash, seat, driver, steering wheel
-    add(box(.4, .14, 1.1), trim, .42, .84, 0);
+    if (!model) add(box(.4, .14, 1.1), trim, .42, .84, 0);
     var dr = new T.Group(); g.add(dr);
     add(box(.28, .5, .42), suit, -.36, .86, -.4, dr); add(new T.SphereGeometry(.14, 16, 12), helmet, -.2, 1.12, -.4, dr);
     add(box(.09, .07, .2), visor, -.07, 1.14, -.4, dr);
     rod(V(-.35, 1.0, -.57), V(.42, .98, -.46), .04, suit, dr); rod(V(-.35, 1.0, -.23), V(.42, .98, -.26), .04, suit, dr);
-    var sw = new T.Group(); sw.position.set(.42, .95, -.36); sw.quaternion.setFromUnitVectors(V(0, 0, 1), V(-.94, .33, 0).normalize()); g.add(sw);
+    var sw = new T.Group(); if (model) sw.position.set(cfg.sw[0], cfg.sw[1], cfg.sw[2]); else sw.position.set(.42, .95, -.36); sw.quaternion.setFromUnitVectors(V(0, 0, 1), V(-.94, .33, 0).normalize()); g.add(sw);
     var swi = new T.Group(); sw.add(swi);
     add(new T.TorusGeometry(.125, .016, 8, 24), trim, 0, 0, 0, swi);
     add(box(.25, .02, .016), trim, 0, 0, 0, swi); add(box(.02, .12, .016), trim, 0, -.06, 0, swi);
     add(box(.025, .045, .02), accent, 0, .125, 0, swi);
 
     // Porsche 911 GT3 R details: round headlights standing on bulging front fenders, a rear engine deck, wordmarks and the crest
-    if (porsche) {
+    if (porsche && !model) {
       var fl = function (rx, ry, rz, x, y, z, mat) { var geo = new T.SphereGeometry(1, 20, 12); geo.scale(rx, ry, rz); return add(geo, mat, x, y, z); };
       [-1, 1].forEach(function (s) {
         fl(.5, .13, .3, 1.45, .76, s * .68, paint);                               // fender hump
@@ -253,7 +328,7 @@
       }
     }
     // Ferrari 296 GT3 details: tricolour, shields, script wordmark, black front mouth; yellow stripe and wing end plates stay yellow
-    if (ferrari) {
+    if (ferrari && !model) {
       add(box(.05, .13, 1.0), trim, 2.33, .36, 0);                                // wide front mouth
       [-1, 1].forEach(function (s) {
         add(box(.55, .03, .013), M({ color: 0x009246, roughness: .5 }), -1.0, .5, s * .893);  // Italian flag on the rear flank
@@ -268,8 +343,8 @@
       var hs = new T.Mesh(new T.PlaneGeometry(.26, .29).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), sh); hs.position.set(1.7, .82, 0); hs.rotation.z = -.2; g.add(hs); // shield on the hood
     }
     // Aston Martin Vantage GT3 details: wide grille, wings badge, ASTON MARTIN on the doors, lime stripe and splitter
-    if (ast) {
-      var ag = new T.Mesh(new T.PlaneGeometry(.86, .26).rotateY(Math.PI / 2), std({ map: TF.astonDecal('grille'), transparent: true, roughness: .5 })); ag.position.set(2.405, .37, 0); g.add(ag);
+    if (ast && !model) {
+      var ag =new T.Mesh(new T.PlaneGeometry(.86, .26).rotateY(Math.PI / 2), std({ map: TF.astonDecal('grille'), transparent: true, roughness: .5 })); ag.position.set(2.405, .37, 0); g.add(ag);
       add(box(.5, .012, 1.86), accent, 2.15, .217, 0);                             // lime splitter edge
       var aw = std({ map: TF.astonDecal('wings'), transparent: true, roughness: .45 }), an = std({ map: TF.astonDecal('word'), transparent: true, roughness: .6 });
       var hb = new T.Mesh(new T.PlaneGeometry(.3, .11).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), aw); hb.position.set(1.85, .79, 0); hb.rotation.z = -.2; g.add(hb);
@@ -280,8 +355,8 @@
       });
     }
     // McLaren 720S GT3 details: black intakes behind the doors, black front mouth, speedmark on the hood, McLaren wordmark
-    if (mcl) {
-      add(box(.06, .14, 1.1), trim, 2.33, .38, 0);                               // wide black mouth
+    if (mcl && !model) {
+      add(box(.06, .14, 1.1), trim, 2.33, .38, 0);                              // wide black mouth
       var sm = std({ map: TF.mclarenDecal('speed'), transparent: true, roughness: .5 }), mw = std({ map: TF.mclarenDecal('word'), transparent: true, roughness: .6 });
       [-1, 1].forEach(function (s) {
         add(box(.42, .3, .03), trim, -.78, .56, s * .9);                           // big side intake
@@ -292,7 +367,7 @@
       var hm = new T.Mesh(new T.PlaneGeometry(.55, .2).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), sm); hm.position.set(1.7, .82, 0); hm.rotation.z = -.2; g.add(hm); // the speedmark on the hood
     }
     // BMW M4 GT3 details: twin kidney grille, roundels, the M stripes along the flank, BMW M wordmark
-    if (bmw) {
+    if (bmw && !model) {
       [-1, 1].forEach(function (s) { TF.BMW_STRIPES.forEach(function (c, i) { add(box(1.9, .03, .013), M({ color: c, roughness: .45 }), -.1, .72 - i * .04, s * .893); }); }); // the M stripes, high on the flank
       var kg = new T.Mesh(new T.PlaneGeometry(.64, .24).rotateY(Math.PI / 2), std({ map: TF.bmwDecal('kidney'), transparent: true, roughness: .5 })); kg.position.set(2.405, .4, 0); g.add(kg);
       var rd = std({ map: TF.bmwDecal('roundel'), transparent: true, roughness: .4 }), bw = std({ map: TF.bmwDecal('word'), transparent: true, roughness: .6 });
@@ -301,7 +376,7 @@
       [-1, 1].forEach(function (s) { var d = new T.Mesh(new T.PlaneGeometry(.62, .116), bw); d.position.set(.62, .5, s * .897); if (s < 0) d.rotation.y = Math.PI; g.add(d); });
     }
     // Audi R8 LMS details: singleframe grille with the four rings, silver sill, wordmark, red wing end plates
-    if (audi) {
+    if (audi && !model) {
       [-1, 1].forEach(function (s) { add(box(2.0, .025, .012), silver, -.15, .3, s * .893); }); // silver sill line
       var rg = std({ map: TF.audiDecal('rings'), transparent: true, roughness: .35, metalness: .6 }), wd = std({ map: TF.audiDecal('word'), transparent: true, roughness: .6 });
       var gr = new T.Mesh(new T.PlaneGeometry(.74, .23).rotateY(Math.PI / 2), std({ map: TF.audiDecal('grille'), transparent: true, roughness: .5 })); gr.position.set(2.405, .37, 0); g.add(gr);
@@ -313,7 +388,7 @@
       var tr = new T.Mesh(new T.PlaneGeometry(.2, .067).rotateY(-Math.PI / 2), rg); tr.position.set(-2.375, .57, 0); g.add(tr); // rings on the tail
     }
     // number roundels on the doors
-    if (!ghost) [-1, 1].forEach(function (s) {
+    if (!ghost && !model) [-1, 1].forEach(function (s) {
       var r = new T.Mesh(new T.CircleGeometry(.17, 28), std({ map: numTex, transparent: true, roughness: .6 }));
       r.position.set(-.2, .6, s * .897); if (s < 0) r.rotation.y = Math.PI; g.add(r);
     });
@@ -341,7 +416,36 @@
     TF.mergeGroup(swi); TF.mergeGroup(dr); TF.mergeGroup(g);
     dr.visible = false; // no driver in the GT3
 
-    car.userData = { body: g, wheels: wheels, steeringWheel: swi, driver: dr, legs: legs, paint: ghost ? [] : [paint], setFlash: setFlash, vehicle: 'gt3' };
+    // the car's body goes in after the merge so its geometry is shared by every car of that make on the track
+    if (model) {
+      var LV = TF.LIV[brand], PG = p911Geos(md), Z = bodyZones(md, cfg);
+      Z.fl0 = LV.flankAll ? Z.tail + .5 : RX + WRR + .1; Z.fl1 = LV.flankAll ? Z.nose - .5 : FX - WR - .1; /* (BMW: the M stripes run the whole length of the side) */ Z.hd0 = FX - .3; Z.hd1 = Z.nose - .05; Z.rf0 = RX + .1; Z.rf1 = FX - .7; Z.roofY = Z.roof; // where the livery stripes go on this body
+      if (paint.emissive) paint.emissive.setHex(brand === 'porsche' ? 0x1a1a1c : 0x000000);
+      if (brand !== 'porsche') { paint.metalness = .1; paint.envMapIntensity = .4; }
+      if (brand === 'ferrari') { paint.color.setHex(0xd00000); paint.emissive.setHex(0x1e0000); paint.metalness = 0; paint.roughness = .38; paint.envMapIntensity = .22; }
+      paint.customProgramCacheKey = function () { return 'gt3' + brand; };
+      paint.onBeforeCompile = gt3Livery(LV, Z);
+      paint.side = T.DoubleSide; // fills the small openings in the shell with the panel behind
+      var roleMat = { paint: paint, black: carbon, glass: glass, light: lamp, tail: tail, floor: trim };
+      Object.keys(PG).forEach(function (k) {
+        var pm = new T.Mesh(PG[k], roleMat[k] || carbon);
+        if (k !== 'glass') { pm.castShadow = !ai; pm.receiveShadow = true; }
+        g.add(pm);
+      });
+      // number low on the flank just in front of the rear wheel, the name on the door, an emblem on the hood
+      var wmM = std({ map: LV.word(), transparent: true, roughness: .6, polygonOffset: true, polygonOffsetFactor: -2 }), rdM = std({ map: numTex, transparent: true, roughness: .6, polygonOffset: true, polygonOffsetFactor: -2 });
+      [-1, 1].forEach(function (s) {
+        var nx = RX + WRR + .32, dx = (RX + FX) / 2 + .35; // the number just ahead of the rear wheel; the name on the door
+        var e1 = flankEdge(md, [nx - .15, nx + .15, .35, .6], s), e2 = flankEdge(md, [dx - .25, dx + .25, .5, .7], s);
+        if (e1) { var r = new T.Mesh(new T.CircleGeometry(.17, 28), rdM); r.position.set(nx, .48, s * (e1 + .006)); if (s < 0) r.rotation.y = Math.PI; g.add(r); }
+        if (e2) { var w = new T.Mesh(new T.PlaneGeometry(LV.ws[0], LV.ws[1]), wmM); w.position.set(dx, .6, s * (e2 + .006)); if (s < 0) w.rotation.y = Math.PI; g.add(w); }
+      });
+      var emM = std({ map: LV.emb(), transparent: true, roughness: .5, polygonOffset: true, polygonOffsetFactor: -2 });
+      var ex = FX + .45, em = new T.Mesh(new T.PlaneGeometry(LV.es[0], LV.es[1]).rotateX(-Math.PI / 2).rotateY(-Math.PI / 2), emM); em.position.set(ex, topNear(md, [ex - .05, ex + .05], .12) + .006, 0); g.add(em);
+      glows.forEach(function (sp, i) { sp.position.set(FX + .67, .62, (i ? 1 : -1) * .6); });
+    }
+
+    car.userData = { body: g, wheels: wheels, steeringWheel: swi, driver: dr, legs: legs, paint: ghost ? [] : [paint], setFlash: setFlash, vehicle: 'gt3', eye: model ? cfg.eye : null, hood: model ? [FX - .05, topNear(md, [FX - .2, FX + .1], .15) + .1, 0] : [1.3, 1.0, 0] };
     return car;
   };
 })();

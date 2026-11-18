@@ -44,8 +44,9 @@
     Settings
   </button>
   <button type="button" id="btnAccount" class="settings-btn account-btn" aria-haspopup="dialog">Log in</button>
+  <button type="button" id="btnBoard" class="settings-btn account-btn lb-btn">Leaderboards</button>
   <button type="button" id="btnLmp" class="lmp-btn" hidden>Switch to LMP1</button>
-  <div class="credit">Porsche LMP1 model: "Porsche 963 LMDh Hypercar" by kilianhoffmann13 (sketchfab.com/kilianhoffmann13), CC-BY-4.0 · simplified for this game</div>
+  <div class="credit">3D models from Sketchfab, simplified for this game: LMP1 "Porsche 963 LMDh Hypercar" by kilianhoffmann13 · Porsche "911 (992) GT3R" by kevin · Ferrari "2018 Ferrari 488 GT3" and McLaren "2015 McLaren 650S GT3" by Ddiaz Design · Aston Martin "Aston Martin Vantage GT3" by Design Studio Poland (all CC-BY-4.0) · BMW "2025 BMW M4 GT3 EVO G82" by Ddiaz Design and Audi "2009 Audi R8 LMS" by OUTPISTON (both CC-BY-NC-SA-4.0: non-commercial use only)</div>
   <div class="title">T-Ford Speedway<small id="menuSub">FREE PRACTICE</small></div>
   <div class="menu-bottom">
     <div class="swatches" id="menuSwatches" aria-label="Paint color"></div>
@@ -156,6 +157,20 @@
   </form>
   <div id="acMsg" class="ac-msg" role="status"></div>
   <div class="buttons"><button id="acBack" type="button" class="quiet">Back (Esc)</button></div>
+</div>
+
+<!-- global leaderboards: fastest lap of every player, per car class -->
+<div id="board" class="side-panel" hidden role="dialog" aria-labelledby="lbTitle">
+  <h2 id="lbTitle">Leaderboards</h2>
+  <div class="set-note">Fastest lap of every player, worldwide. Log in to be on the list.</div>
+  <div id="lbTabs" class="lb-tabs" role="radiogroup" aria-label="Car class">
+    <button type="button" role="radio" aria-checked="false">Model T</button>
+    <button type="button" role="radio" aria-checked="true">GT3</button>
+    <button type="button" role="radio" aria-checked="false">LMP1</button>
+  </div>
+  <div class="set-label" id="lbTrack"></div>
+  <div id="lbRows" class="lb-rows" role="list"></div>
+  <div class="buttons"><button id="lbBack" type="button" class="quiet">Back (Esc)</button></div>
 </div>
 
 <div id="fatal" hidden></div>
