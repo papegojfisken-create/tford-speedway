@@ -52,6 +52,7 @@
   </button>
   <button type="button" id="btnAccount" class="settings-btn account-btn" aria-haspopup="dialog">Log in</button>
   <button type="button" id="btnBoard" class="settings-btn account-btn lb-btn">Leaderboards</button>
+  <button type="button" id="btnServers" class="settings-btn account-btn srv-btn" hidden>Servers</button>
   <button type="button" id="btnLmp" class="lmp-btn" hidden>Switch to LMP1</button>
   <div class="credit">3D models from Sketchfab, simplified for this game: LMP1 "Porsche 963 LMDh Hypercar" by kilianhoffmann13 · Porsche "911 (992) GT3R" by kevin · Ferrari "2018 Ferrari 488 GT3" and McLaren "2015 McLaren 650S GT3" by Ddiaz Design · Aston Martin "Aston Martin Vantage GT3" by Design Studio Poland (all CC-BY-4.0) · BMW "2025 BMW M4 GT3 EVO G82" by Ddiaz Design and Audi "2009 Audi R8 LMS" by OUTPISTON (both CC-BY-NC-SA-4.0: non-commercial use only)</div>
   <div class="title">T-Ford Speedway<small id="menuSub">FREE PRACTICE</small></div>
@@ -75,6 +76,11 @@
       <label for="aiLmp">AI LMP1 cars</label>
       <input type="range" id="aiLmp" min="0" max="10" step="1" value="3">
       <b id="aiLmpLabel">3</b>
+    </div>
+    <div class="ai-row" id="rowRanked" hidden>
+      <label for="ranked">Ranked</label>
+      <input type="checkbox" id="ranked" class="rk-in">
+      <b id="rankedNote">off</b>
     </div>
     <div class="ai-row" id="rowLaps">
       <label for="raceLaps">Race laps</label>
@@ -153,6 +159,8 @@
   <h2 id="acTitle">Account</h2>
   <div id="acOut" hidden>
     <p class="set-note">Signed in as <b id="acName"></b>.</p>
+    <div class="set-label">Driver rating</div>
+    <div id="acElo" class="ac-elo"></div>
     <p class="set-note">Your colour, car number, settings, best laps and ghosts are saved to your account and follow you to any computer.</p>
     <div class="buttons"><button id="acLogout" type="button">Log out</button></div>
   </div>
@@ -169,7 +177,11 @@
 <!-- global leaderboards: fastest lap of every player, per car class -->
 <div id="board" class="side-panel" hidden role="dialog" aria-labelledby="lbTitle">
   <h2 id="lbTitle">Leaderboards</h2>
-  <div class="set-note">Fastest lap of every player, worldwide. Log in to be on the list.</div>
+  <div class="set-note">Fastest lap and driver rating of every player, worldwide. Log in to be on the lists.</div>
+  <div id="lbKind" class="lb-tabs" role="radiogroup" aria-label="List">
+    <button type="button" role="radio" aria-checked="true" data-kind="lap">Fastest laps</button>
+    <button type="button" role="radio" aria-checked="false" data-kind="elo">Rating</button>
+  </div>
   <div id="lbTabs" class="lb-tabs" role="radiogroup" aria-label="Car class">
     <button type="button" role="radio" aria-checked="false">Model T</button>
     <button type="button" role="radio" aria-checked="true">GT3</button>
@@ -178,6 +190,15 @@
   <div class="set-label" id="lbTrack"></div>
   <div id="lbRows" class="lb-rows" role="list"></div>
   <div class="buttons"><button id="lbBack" type="button" class="quiet">Back (Esc)</button></div>
+</div>
+
+<!-- public servers: two rooms that are always open, with fixed settings -->
+<div id="servers" class="side-panel" hidden role="dialog" aria-labelledby="svTitle">
+  <h2 id="svTitle">Servers</h2>
+  <div class="set-note">Always open. Spa-Francorchamps, full AI field (20 GT3 + 10 LMP1), 10-lap races. The settings are fixed; you choose GT3 or LMP1, your colour and number.</div>
+  <div id="svList" class="sv-list"></div>
+  <div id="svMsg" class="ac-msg" role="status"></div>
+  <div class="buttons"><button id="svBack" type="button" class="quiet">Back (Esc)</button></div>
 </div>
 
 <div id="fatal" hidden></div>

@@ -17,7 +17,7 @@
   // Best lap and ghost are kept per vehicle: save.best / save.ghost belong to the vehicle in use, the other one waits in save.store.
   // ai = Model T drivers on the speedway, aiGt3 and aiLmp = GT3 and LMP1 drivers at Spa.
   var LMP_UNLOCK = 119; // seconds: a GT3 lap under 1:59 at Spa unlocks the LMP1
-  var save = { laps: 5, lmpOk: false, num: 7, color: 0, best: null, ghost: null, ai: 3, aiGt3: 8, aiLmp: 3, veh: 'tford', store: {} };
+  var save = { ranked: false, laps: 5, lmpOk: false, num: 7, color: 0, best: null, ghost: null, ai: 3, aiGt3: 8, aiLmp: 3, veh: 'tford', store: {} };
   // a saved lap only counts if it was driven on the circuit this vehicle uses now (laps saved before there were two circuits are 'classic')
   function okLap(l, v) { return l && typeof l.best === 'number' && l.ghost && Array.isArray(l.ghost.x) && l.ghost.x.length > 10 && Array.isArray(l.ghost.q) && (l.track || 'classic') === VEH[v].track; }
   try {
@@ -29,6 +29,7 @@
       if (raw.color >= 0 && raw.color < COLORS.length) save.color = raw.color | 0;
       if (raw.num >= 0 && raw.num <= 99) save.num = raw.num | 0;
       if (raw.laps >= 1 && raw.laps <= 50) save.laps = raw.laps | 0;
+      if (raw.rk === true) save.ranked = true;
       if (raw.lmpU === true) save.lmpOk = true; // (an earlier build wrote 'lmpOk' too eagerly; that flag is ignored)
       if (typeof raw.veh === 'string' && VEH[raw.veh]) save.veh = raw.veh;
       if (!save.lmpOk && save.veh === 'lmp1') save.veh = 'gt3'; // the prototype has to be unlocked first
@@ -39,7 +40,7 @@
   function lapEntry(v) { return save.best != null && save.ghost ? { best: save.best, ghost: save.ghost, track: VEH[v].track } : undefined; }
   function persist() {
     save.store[save.veh] = lapEntry(save.veh);
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ laps: save.laps, lmpU: save.lmpOk, num: save.num, color: save.color, ai: save.ai, aiGt3: save.aiGt3, aiLmp: save.aiLmp, veh: save.veh, store: save.store })); } catch (e) { /* storage unavailable */ }
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ rk: save.ranked, laps: save.laps, lmpU: save.lmpOk, num: save.num, color: save.color, ai: save.ai, aiGt3: save.aiGt3, aiLmp: save.aiLmp, veh: save.veh, store: save.store })); } catch (e) { /* storage unavailable */ }
     if (TF.account) TF.account.queue(); // when logged in, the saved game is copied to the account a few seconds later
   }
 
@@ -122,7 +123,7 @@
     a.phys.power = sp.power; a.phys.setVehicle(veh); scene.add(mesh); return a;
   }
   // how many AI cars the sliders ask for on the current circuit
-  function wantedCounts() { return K.kind === 'oval' ? { tford: save.ai, gt3: 0, lmp1: 0 } : { tford: 0, gt3: save.aiGt3, lmp1: save.aiLmp }; }
+  function wantedCounts() { if (pubCfg()) return { tford: 0, gt3: AI_MAX.gt3, lmp1: AI_MAX.lmp1 }; return K.kind === 'oval' ? { tford: save.ai, gt3: 0, lmp1: 0 } : { tford: 0, gt3: save.aiGt3, lmp1: save.aiLmp }; }
   function aiCounts() { var c = [0, 0, 0]; ais.forEach(function (a) { c[AI_ORDER.indexOf(a.veh)]++; }); return c; }
   // add or remove AI cars until the field matches the counts; the cars stay sorted fastest kind first
   function applyAiCounts(want) {
@@ -140,8 +141,9 @@
   }
   // the sliders: Model T drivers on the speedway, GT3 and LMP1 drivers at Spa
   function syncAiUi() {
-    var circuit = K.kind !== 'oval';
-    [['aiCount', 'aiLabel', save.ai], ['aiGt3', 'aiGt3Label', save.aiGt3], ['aiLmp', 'aiLmpLabel', save.aiLmp]].forEach(function (s) {
+    var circuit = K.kind !== 'oval', pb = !!pubCfg(); // on a public server the field is fixed at the maximum
+    [['aiCount', 'aiLabel', save.ai], ['aiGt3', 'aiGt3Label', pb ? AI_MAX.gt3 : save.aiGt3], ['aiLmp', 'aiLmpLabel', pb ? AI_MAX.lmp1 : save.aiLmp]].forEach(function (s) {
+      if ($(s[0]).disabled !== pb) $(s[0]).disabled = pb;
       if ($(s[0]).value !== String(s[2])) $(s[0]).value = s[2];
       if ($(s[1]).textContent !== String(s[2])) $(s[1]).textContent = s[2];
     });
@@ -152,6 +154,7 @@
   // the main slider on the current circuit (what the arrow keys change)
   function mainAi() { return K.kind === 'oval' ? save.ai : save.aiGt3; }
   function setAiCount(n) {
+    if (pubCfg()) return; // fixed on a public server
     if (K.kind === 'oval') save.ai = clamp(n | 0, 0, AI_MAX.tford); else save.aiGt3 = clamp(n | 0, 0, AI_MAX.gt3);
     persist(); applyAiCounts(wantedCounts());
   }
@@ -284,7 +287,7 @@
   // ---------- multiplayer ----------
   // Every car in the world: mine, the AI cars, and the other players' cars.
   // A car with remote = true is driven by another computer; here it is only shown and bumped into.
-  var net = TF.net, remotes = {}, myPeer = null, isHost = true, kickSeq = 0, kickTo = '', flashSeq = 0, lastSend = 0, slot = 0, online = 0, joinedAt = 0, netMsg = '';
+  var net = TF.net, remotes = {}, myPeer = null, isHost = true, hostNow = null, kickSeq = 0, kickTo = '', flashSeq = 0, lastSend = 0, slot = 0, online = 0, joinedAt = 0, netMsg = '';
   function everyone() { var all = [phys]; ais.forEach(function (a) { all.push(a.phys); }); for (var id in remotes) all.push(remotes[id].phys); return all; }
   function r2(v) { return Math.round(v * 100) / 100; }
   function r3(v) { return Math.round(v * 1000) / 1000; }
@@ -354,7 +357,7 @@
     // the host is the player who has been on track longest; the host's computer drives the AI cars for everyone
     ids.sort(function (a, b) { return (since[a] - since[b]) || (a < b ? -1 : 1); }); online = ids.length;
     var hostId = ids.length ? ids[0] : null;
-    isHost = !hostId || hostId === myPeer;
+    isHost = !hostId || hostId === myPeer; hostNow = hostId;
     slot = state === 'menu' ? ids.length : Math.max(0, ids.indexOf(myPeer));
     if (!isHost && remotes[hostId]) {
       var hp = remotes[hostId].pres, arr = hp && Array.isArray(hp.ai) ? hp.ai : [], ac = hp && Array.isArray(hp.ac) ? hp.ac : [0, 0, 0];
@@ -379,7 +382,8 @@
       lastSend = now;
       var moving = state === 'drive', msg = {
         c: [r2(phys.x), r2(phys.z), r3(phys.psi), moving ? r2(phys.u) : 0, moving ? r2(phys.v) : 0, moving ? r3(phys.r) : 0, r3(phys.delta), r2(Math.max(0, phys.air)), phys.airSide, r2(phys.wobble)],
-        col: save.color, n: save.num, veh: myVeh, trk: K.id, bo: phys.boosting ? 1 : 0, st: state === 'menu' ? 0 : moving ? 1 : 2, t: joinedAt, rd: gridHold && !readyMe ? 0 : 1, k: [kickSeq, kickTo], fl: flashSeq, ai: null, ac: aiCounts()
+        col: save.color, n: save.num, veh: myVeh, trk: K.id, bo: phys.boosting ? 1 : 0, st: state === 'menu' ? 0 : moving ? 1 : 2, t: joinedAt, rd: gridHold && !readyMe ? 0 : 1, rc: raceLive && !gridHold && !finished && state !== 'menu' ? 1 : 0,
+        rk: rankedOn() ? 1 : 0, un: TF.account && TF.account.user ? TF.account.user() : null, k: [kickSeq, kickTo], fl: flashSeq, ai: null, ac: aiCounts()
       };
       if (isHost && state !== 'menu') { msg.ai = []; for (i = 0; i < ais.length; i++) { var q2 = ais[i].phys; msg.ai.push(r2(q2.x), r2(q2.z), r3(q2.psi), r2(q2.u), r3(q2.delta)); } }
       net.send(msg);
@@ -388,6 +392,7 @@
     var label = net.status === 'online' ? (net.code ? 'CODE ' + net.code + ' · ' : 'ONLINE · ') + (others ? (others + 1) + ' DRIVERS' : 'WAITING FOR OTHERS')
       : net.status === 'connecting' ? 'CONNECTING' : netMsg;
     if (hNet.textContent !== label) { hNet.textContent = label; hNet.hidden = !label; menuNet.textContent = label; }
+    syncLocks();
   }
 
   // slipstream: strongest 3 to 8 m straight behind another car, fading out by 25 m and 1.6 m to the side
@@ -536,7 +541,7 @@
   }
   function updateHud() {
     hLap.textContent = 'LAP ' + (lap < 0 ? 1 : lap + 1);
-    var lapNow = String(Math.min(save.laps, lap < 0 ? 1 : lap + 1)), lapOf = '/ ' + save.laps; // the big counter, bottom left
+    var lapNow = String(Math.min(raceLaps(), lap < 0 ? 1 : lap + 1)), lapOf = '/ ' + raceLaps(); // the big counter, bottom left
     if (hLapNow.textContent !== lapNow) hLapNow.textContent = lapNow;
     if (hLapOf.textContent !== lapOf) hLapOf.textContent = lapOf;
     hTime.textContent = fmt(lap < 0 ? 0 : lapT);
@@ -622,6 +627,9 @@
   }
   function setVehicle(id) {
     if (!VEH[id] || id === myVeh || (id === 'lmp1' && !save.lmpOk)) return;
+    var pb = pubCfg();
+    if (pb && id === 'tford') { toast('The public servers race at Spa: GT3 or LMP1'); return; }
+    if (pb && pb.ranked && TF.account && TF.account.ratings() && TF.account.ratings()[id] < pb.min) { toast('You need a ' + id.toUpperCase() + ' rating of ' + pb.min + ' on the ranked server'); return; }
     save.store[myVeh] = lapEntry(myVeh); // keep this vehicle's best lap
     myVeh = id; save.veh = id;
     var st = save.store[id]; save.best = st ? st.best : null; save.ghost = st ? st.ghost : null;
@@ -679,26 +687,44 @@
     });
   }
   var gridLamps = document.querySelectorAll('#gridLights i');
-  function beginGrid() { gridHold = true; readyMe = false; lightsT = -1; lampsOn = 0; gridSig = ''; $('btnReady').hidden = false; $('gridMsg').textContent = ''; $('grid').hidden = false; for (var i = 0; i < 5; i++) gridLamps[i].classList.remove('on'); }
+  function beginGrid() { gridHold = true; readyMe = false; lightsT = -1; pubT = -1; lampsOn = 0; gridSig = ''; $('btnReady').hidden = false; $('gridMsg').textContent = ''; $('grid').hidden = false; for (var i = 0; i < 5; i++) gridLamps[i].classList.remove('on'); }
   function endHold(go) {
     gridHold = false; lightsT = -1; lampsOn = 0; $('grid').hidden = true;
-    if (go) { toast('GO!', 'best'); sound.beep(880, 0.5); }
+    if (go) { toast('GO!', 'best'); sound.beep(880, 0.5); raceBegins(); }
   }
   function setReady() { if (!gridHold || readyMe) return; readyMe = true; $('btnReady').hidden = true; sound.start(); }
   $('btnReady').addEventListener('click', function () { setReady(); this.blur(); });
   function holdStep() {
     if (K.kind === 'oval') { endHold(false); return; }
     var sig = gridSignature(); if (sig !== gridSig) { gridSig = sig; layoutGrid(); }
-    var waitN = menuWait;
-    for (var id in remotes) { var pr = remotes[id].pres; if (pr && pr.rd === 0) waitN++; }
-    if (readyMe && lightsT < 0 && waitN === 0) lightsT = 0;
+    // on a public server, drivers on the start screen do not count, a race in progress makes you wait for the next one,
+    // and once anyone is ready the lights start within 30 seconds
+    var pb = pubCfg(), waitN = pb ? 0 : menuWait, racingN = 0, anyReady = readyMe;
+    for (var id in remotes) {
+      var pr = remotes[id].pres; if (!pr) continue;
+      if (pb && pr.rc === 1) racingN++;
+      else if (pr.rd === 0) waitN++;
+      else if (pr.rd === 1) anyReady = true;
+    }
+    var msg = '';
+    if (pb && lightsT < 0) {
+      if (racingN) { pubT = -1; msg = 'Race in progress · you start in the next race'; }
+      else {
+        if (anyReady && pubT < 0) pubT = 0;
+        if (pubT >= 0) { pubT += lastDt; msg = 'Race starts in ' + Math.max(1, Math.ceil(PUB_WAIT - pubT)) + ' s'; }
+        if ((readyMe && waitN === 0) || pubT >= PUB_WAIT) { lightsT = 0; $('btnReady').hidden = true; }
+      }
+    }
+    else if (readyMe && lightsT < 0 && waitN === 0) lightsT = 0;
     if (lightsT >= 0) {
       lightsT += lastDt;
       var n = Math.min(5, Math.floor(lightsT) + 1);
       if (n !== lampsOn) { lampsOn = n; for (var i = 0; i < 5; i++) gridLamps[i].classList.toggle('on', i < n); sound.beep(520, 0.18); }
       if (lightsT >= 5) { endHold(true); return; }
     }
-    $('gridMsg').textContent = readyMe && lightsT < 0 ? 'Waiting for ' + waitN + ' other player' + (waitN > 1 ? 's' : '') + '…' : '';
+    if (!msg && readyMe && lightsT < 0) msg = 'Waiting for ' + waitN + ' other player' + (waitN > 1 ? 's' : '') + '…';
+    if (lightsT >= 0) msg = '';
+    if ($('gridMsg').textContent !== msg) $('gridMsg').textContent = msg;
   }
   var lastDt = 0.016;
   function startDrive() {
@@ -706,6 +732,7 @@
     if (first) { if (K.kind === 'oval' && slot > 0) gridPlace(slot); joinedAt = Date.now(); }
     state = 'drive'; $('menu').hidden = true; $('pause').hidden = true; hud.hidden = false; sound.start();
     if (first && K.kind !== 'oval') beginGrid();
+    else if (first) raceBegins(); // the speedway has no start lights: the race is on from the first moment
   }
   function pause() {
     if (state !== 'drive') return;
@@ -723,6 +750,7 @@
     this.textContent = 'Best lap cleared'; $('pBest').textContent = fmt(null);
   });
   function toMenu() {
+    if (raceLive && !finished) reportRace(nCls, nCls, false); // leaving a race that has started counts as last
     gridHold = false; $('grid').hidden = true;
     state = 'menu'; keys = {}; sound.silence(); resetRun(); // everyone, AI included, goes back to the starting positions
     $('pause').hidden = true; hud.hidden = true; $('menu').hidden = false;
@@ -731,6 +759,7 @@
   // the race is over: show the result for a few seconds, then back to the start screen
   function endRace() {
     finished = true; endT = 4.5;
+    reportRace(posCls, nCls, false);
     var cl = myVeh === 'lmp1' ? 'LMP1' : myVeh === 'gt3' ? 'GT3' : '';
     toast('FINISHED · P' + posAll + ' of ' + nAll + (cl && nCls !== nAll ? ' · P' + posCls + ' ' + cl : '') + ' · ' + fmt(raceT), 'best'); toastT = endT;
   }
@@ -763,6 +792,101 @@
   syncLapsUi();
   raceLapsEl.addEventListener('input', function () { save.laps = clamp(+this.value | 0, 1, 50); syncLapsUi(); persist(); });
   raceLapsEl.addEventListener('change', function () { this.blur(); });
+
+  // ---------- public servers, ranked races and the driver rating ----------
+  var PUB_WAIT = 30, pubT = -1, raceLive = false, raceRanked = false, CLASS_NAME = { tford: 'Model T', gt3: 'GT3', lmp1: 'LMP1' };
+  function pubCfg() { return net.code && net.PUBLIC && net.PUBLIC[net.code] || null; } // on one of the two public servers?
+  function raceLaps() { return pubCfg() ? 10 : save.laps; }
+  function loggedIn() { return !!(TF.account && TF.account.user && TF.account.user()); }
+  function onlineGuest() { return !!(net.room && !isHost && hostNow && remotes[hostNow]); } // someone else hosts the race I am in
+  // does this race count for the rating? Public servers decide for themselves; online, the host decides; alone, my own switch
+  function rankedOn() {
+    var p = pubCfg(); if (p) return p.ranked;
+    if (onlineGuest()) { var hp = remotes[hostNow].pres; return !!(hp && hp.rk); }
+    return save.ranked;
+  }
+  function raceBegins() { raceLive = true; raceRanked = rankedOn() && loggedIn(); }
+  // the race is over for me (finished, or left early = last): the server works out my new rating
+  function reportRace(p, n, closing) {
+    if (!raceLive) return; raceLive = false;
+    if (!raceRanked || n < 3 || !TF.account) return;
+    var opp = []; for (var id in remotes) { var o = remotes[id]; if (o.veh === myVeh && o.pres && typeof o.pres.un === 'string') opp.push(o.pres.un); }
+    var res = { veh: myVeh, n: Math.min(40, n), p: clamp(p, 1, Math.min(40, n)), laps: raceLaps(), opp: opp.slice(0, 9) };
+    if (closing) { TF.account.raceBeacon(res); return; }
+    TF.account.race(res).then(function (r) {
+      if (!r) return;
+      var txt = CLASS_NAME[r.veh] + ' rating ' + Math.round(r.r) + ' (' + (r.d >= 0 ? '+' : '−') + Math.abs(r.d).toFixed(1) + ')';
+      if (finished && state === 'drive') { toastEl.textContent += ' · ' + txt; toastT = Math.max(toastT, 3); } else toast(txt, r.d >= 0 ? 'best' : '');
+    });
+  }
+  window.addEventListener('pagehide', function () { if (raceLive && !finished) reportRace(nCls, nCls, true); });
+
+  // the Ranked switch on the start screen (only when logged in), and the settings a public server fixes
+  var rankedEl = $('ranked'), lockKey = '';
+  rankedEl.addEventListener('change', function () { save.ranked = this.checked; persist(); lockKey = ''; syncLocks(); this.blur(); });
+  function syncLocks() {
+    var p = pubCfg(), guest = !p && onlineGuest(), on = rankedOn(), li = loggedIn();
+    var key = [net.code, guest, on, li, raceLaps(), myVeh].join('|'); if (key === lockKey) return; lockKey = key;
+    $('rowRanked').hidden = !li;
+    rankedEl.checked = on; rankedEl.disabled = !!p || guest;
+    $('rankedNote').textContent = p ? (on ? 'on · server' : 'off · server') : guest ? (on ? 'on · set by the host' : 'off · set by the host') : on ? 'on' : 'off';
+    raceLapsEl.disabled = !!p; raceLapsEl.value = raceLaps(); $('raceLapsLabel').textContent = raceLaps();
+    if (p && myVeh === 'tford') setVehicle('gt3'); // the public servers race at Spa
+    applyAiCounts(wantedCounts()); syncAiUi();
+    var sub = $('menuSub'); if (p) sub.textContent = p.name.toUpperCase() + ' · ' + net.code + ' · ' + VEH[myVeh].name.toUpperCase(); else updateVehicleUi();
+  }
+  TF.onAccount = function () { lockKey = ''; syncLocks(); };
+
+  // the Servers panel: the two public servers, how many drivers are on each, and a Join button
+  var svOpen = false;
+  function svSay(t, bad) { var m = $('svMsg'); m.textContent = t || ''; m.className = 'ac-msg' + (bad ? ' bad' : ''); }
+  function drawServers(counts) {
+    var list = $('svList'); list.textContent = '';
+    Object.keys(net.PUBLIC).forEach(function (code) {
+      var c = net.PUBLIC[code], d = document.createElement('div'); d.className = 'sv';
+      var b = document.createElement('b'); b.textContent = c.name;
+      var k = document.createElement('code'); k.textContent = code;
+      var s = document.createElement('span'); var n = counts && typeof counts[code] === 'number' ? counts[code] : null;
+      s.textContent = (n === null ? '…' : n + ' / 9 drivers') + ' · ' + (c.ranked ? 'Ranked · ' + c.min + '+ rating' : 'Not ranked');
+      var j = document.createElement('button'); j.type = 'button';
+      var here = net.code === code; j.textContent = here ? 'Connected' : 'Join';
+      j.disabled = here || net.status === 'online' || net.status === 'connecting';
+      j.addEventListener('click', function () { joinServer(code); });
+      d.appendChild(b); d.appendChild(k); d.appendChild(s); d.appendChild(j); list.appendChild(d);
+    });
+  }
+  function openServers() {
+    svOpen = true; TF.uiLock = true; $('servers').hidden = false; svSay(net.status === 'online' && !pubCfg() ? 'You are already in an online game. Reload the page to leave it first.' : '');
+    drawServers(null);
+    fetch(net.status_url).then(function (r) { return r.json(); }).then(function (j) { if (svOpen) drawServers(j); }, function () { if (svOpen) { drawServers(null); svSay('Could not reach the servers. Check the internet.', true); } });
+  }
+  function closeServers() { svOpen = false; TF.uiLock = false; $('servers').hidden = true; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }
+  function joinServer(code) {
+    var c = net.PUBLIC[code], q = '', v = myVeh === 'tford' ? 'gt3' : myVeh;
+    if (c.ranked) {
+      var tok = TF.account && TF.account.token && TF.account.token();
+      if (!tok) { svSay('The ranked server needs an account. Log in first.', true); return; }
+      var rt = TF.account.ratings();
+      if (rt && rt[v] < c.min) { svSay('You need a ' + CLASS_NAME[v] + ' rating of ' + c.min + ' to join. Yours is ' + Math.round(rt[v]) + '.', true); return; }
+      q = '?t=' + tok + '&veh=' + v;
+    }
+    if (myVeh === 'tford') setVehicle('gt3');
+    svSay('Connecting…'); netBusy(true); netMsg = 'CONNECTING…';
+    net.joinGame(code, function (err) {
+      netDone(err);
+      if (err) { svSay(NET_ERRORS[err] || 'Could not connect (' + err + ').', true); drawServers(null); return; }
+      lockKey = ''; syncLocks(); closeServers();
+    }, q);
+  }
+  if (net.canCode) {
+    $('btnServers').hidden = false;
+    $('btnServers').addEventListener('click', function () { openServers(); this.blur(); });
+    $('svBack').addEventListener('click', closeServers);
+    window.addEventListener('keydown', function (e) { if (svOpen && e.code === 'Escape') { e.preventDefault(); closeServers(); } });
+  }
+  NET_ERRORS['rank-low'] = 'Your rating is below 1250 in this class, so the ranked server will not let you in.';
+  NET_ERRORS['rank-login'] = 'The ranked server needs you to be logged in.';
+  syncLocks();
 
   // ---------- keyboard ----------
   var DRIVE_KEYS = { ArrowUp: 1, ArrowDown: 1, ArrowLeft: 1, ArrowRight: 1, Space: 1, KeyW: 1, KeyA: 1, KeyS: 1, KeyD: 1 };
@@ -844,7 +968,7 @@
         var over = ds > 0 ? clamp((q - (lap + 1) * LAP) / ds, 0, 1) * dt : 0;
         finishLap(lapT - over); raceT += lapT - over; raceCount++;
         lap++; lapT = over; lapValid = true; rec = newRec(); gp = 0;
-        if (!finished && raceCount >= save.laps) endRace();
+        if (!finished && raceCount >= raceLaps()) endRace();
       }
     }
     // record this lap for the ghost
@@ -1037,7 +1161,8 @@
       updateCamera(0); renderer.render(scene, cam); var url = renderer.domElement.toDataURL('image/jpeg', 0.88);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2)); resize(); return url;
     },
-    raceInfo: function () { return { count: raceCount, laps: save.laps, finished: finished, endT: endT, raceT: raceT, state: state }; },
+    rankedOn: function () { return rankedOn(); }, pub: function () { return pubCfg(); },
+    raceInfo: function () { return { count: raceCount, laps: raceLaps(), live: raceLive, ranked: raceRanked, posCls: posCls, nCls: nCls, finished: finished, endT: endT, raceT: raceT, state: state }; },
     unlockLmp: function (on) { save.lmpOk = on !== false; updateVehicleUi(); }, finishLapTest: function (t) { lapValid = true; finishLap(t); },
     phys: phys, fx: fx, ais: ais, kick: playerKick, onShift: onShift, boostInfo: function () { return { e: phys.boostE, on: phys.boosting }; }, setVehicle: setVehicle, setTrack: setTrack, trackId: function () { return K.id; }, vehicle: function () { return myVeh; }, aiKinds: aiCounts, setAiMix: function (g, l) { save.aiGt3 = clamp(g | 0, 0, 20); save.aiLmp = clamp(l | 0, 0, 10); applyAiCounts(wantedCounts()); },
     flashInfo: function () { return { flT: me.flT, seq: flashSeq, intensity: flashLight.intensity }; },

@@ -5,7 +5,7 @@
   function Sound() { this.ctx = null; this.muted = false; this.pulses = 2; this.profile = 'tford'; }
 
   // 'tford': slow four-cylinder putt-putt and the "ahooga" horn. 'gt3': a faster, higher engine note and a plain two-tone horn.
-  Sound.prototype.setProfile = function (p) { this.profile = p === 'lmp1' ? 'gt3' : p; this.pulses = p === 'lmp1' ? 4 : p === 'gt3' ? 3 : 2; };
+  Sound.prototype.setProfile = function (p) { this.kind = p; this.profile = p === 'lmp1' ? 'gt3' : p; this.pulses = p === 'lmp1' ? 4 : p === 'gt3' ? 3 : 2; };
 
   // Browsers only allow sound after a key press or click, so this is called from the first input.
   Sound.prototype.start = function () {
@@ -31,6 +31,21 @@
     this.osc1.connect(gain(0.6, chuff.gain));
     this.osc1.start(); this.osc2.start();
 
+    // race-car engine (GT3 and prototype): firing-rate sawtooth + octave + low growl, pushed through a soft clipper for the rasp,
+    // with a rising low-pass, intake/exhaust noise, a straight-cut gear whine and pops when the driver lifts at high revs
+    this.nbuf = buf;
+    var gt = this.gtGain = gain(0, master), shaper = c.createWaveShaper(), cv = new Float32Array(512);
+    for (var ci = 0; ci < 512; ci++) cv[ci] = Math.tanh((ci / 256 - 1) * 2.8);
+    shaper.curve = cv; shaper.oversample = '2x';
+    this.gtLP = filter('lowpass', 1500, 1.4, gt); shaper.connect(this.gtLP);
+    var pre = gain(0.5, shaper);
+    this.gA = c.createOscillator(); this.gA.type = 'sawtooth'; this.gB = c.createOscillator(); this.gB.type = 'sawtooth'; this.gC = c.createOscillator(); this.gC.type = 'square';
+    this.gA.connect(gain(0.55, pre)); this.gB.connect(gain(0.3, pre)); this.gC.connect(this.gCg = gain(0.22, pre));
+    this.gA.start(); this.gB.start(); this.gC.start();
+    this.gtNoiseG = gain(0, gt); this.gtBP = filter('bandpass', 1200, 0.9, this.gtNoiseG); noise().connect(this.gtBP);
+    this.whineG = gain(0, master); this.whine = c.createOscillator(); this.whine.type = 'sine'; this.whine.connect(this.whineG); this.whine.start();
+    this.lastThr = 0;
+
     // tyres, wind, wall scrape
     this.sqGain = gain(0, master); noise().connect(filter('bandpass', 1150, 14, this.sqGain));
     this.sqF = filter('bandpass', 1650, 18, gain(0.6, this.sqGain)); noise().connect(this.sqF);
@@ -44,9 +59,24 @@
   Sound.prototype.update = function (o) {
     if (!this.ctx) return;
     var t = this.ctx.currentTime, f = o.rpm / 60 * this.pulses;
+    if (this.profile !== 'tford') {
+      var thr = o.thr, cup = this.kind === 'gt3'; // the GT3 is a Porsche 992 GT3 Cup style flat-six: free-revving, screaming to about 8,500 rpm
+      var rr = cup ? o.rpm * 0.95 : o.rpm; f = rr / 60 * this.pulses;
+      this.engGain.gain.setTargetAtTime(0, t, 0.05);
+      this.gA.frequency.setTargetAtTime(f, t, 0.03); this.gB.frequency.setTargetAtTime(f * 2.008, t, 0.03); this.gC.frequency.setTargetAtTime(f / 2, t, 0.03);
+      this.gCg.gain.setTargetAtTime(cup ? 0.17 : 0.22, t, 0.1);
+      this.gtLP.frequency.setTargetAtTime(900 + rr * (cup ? 0.65 : 0.55) + thr * 1300, t, 0.06);
+      this.gtGain.gain.setTargetAtTime(0.2 + thr * 0.2, t, 0.05);
+      this.gtNoiseG.gain.setTargetAtTime(cup ? 0.08 + thr * 0.22 : 0.06 + thr * 0.14, t, 0.05); this.gtBP.frequency.setTargetAtTime(700 + rr * 0.3, t, 0.08);
+      this.whine.frequency.setTargetAtTime(250 + o.speed * 20, t, 0.1); this.whineG.gain.setTargetAtTime(Math.min(0.03, o.speed * 0.0004) * (thr ? 0.6 : 1), t, 0.1);
+      if (this.lastThr > 0.5 && thr < 0.5 && o.rpm > 4000 && Math.random() < (cup ? 0.3 : 0.85)) this.pops(cup ? 1 + Math.floor(Math.random() * 2) : 2 + Math.floor(Math.random() * 3));
+      this.lastThr = thr;
+    } else {
+      this.gtGain.gain.setTargetAtTime(0, t, 0.05); this.whineG.gain.setTargetAtTime(0, t, 0.05); this.lastThr = 0;
     this.osc1.frequency.setTargetAtTime(f, t, 0.06); this.osc2.frequency.setTargetAtTime(f / 2, t, 0.06);
     this.engLP.frequency.setTargetAtTime(220 + o.rpm * 0.35 + o.thr * 260, t, 0.08);
     this.engGain.gain.setTargetAtTime(0.16 + o.thr * 0.16, t, 0.08);
+    }
     this.sqGain.gain.setTargetAtTime(Math.min(0.22, o.slide * 0.22), t, 0.05);
     this.sqF.frequency.setTargetAtTime(1500 + o.slide * 400, t, 0.1);
     this.windGain.gain.setTargetAtTime(Math.min(0.2, o.speed * o.speed / 400 * 0.16), t, 0.2);
@@ -56,9 +86,21 @@
 
   Sound.prototype.silence = function () {
     if (!this.ctx) return; var t = this.ctx.currentTime;
-    [this.engGain, this.sqGain, this.windGain, this.scrGain, this.turboGain].forEach(function (g) { g.gain.setTargetAtTime(0, t, 0.05); });
+    [this.engGain, this.gtGain, this.whineG, this.sqGain, this.windGain, this.scrGain, this.turboGain].forEach(function (g) { g.gain.setTargetAtTime(0, t, 0.05); });
   };
 
+  // the crackle from the exhaust when the driver lifts off at high revs: a few short bangs
+  Sound.prototype.pops = function (n) {
+    if (!this.ctx) return; var c = this.ctx, t0 = c.currentTime;
+    for (var k = 0; k < n; k++) {
+      var t = t0 + 0.03 + k * (0.05 + Math.random() * 0.09);
+      var src = c.createBufferSource(); src.buffer = this.nbuf; var bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 350 + Math.random() * 900; bp.Q.value = 1.1;
+      var g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.5, t + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.07);
+      src.connect(bp); bp.connect(g); g.connect(this.master); src.start(t, Math.random()); src.stop(t + 0.09);
+      var o = c.createOscillator(), og = c.createGain(); o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.06);
+      og.gain.setValueAtTime(0.25, t); og.gain.exponentialRampToValueAtTime(0.0001, t + 0.08); o.connect(og); og.connect(this.master); o.start(t); o.stop(t + 0.1);
+    }
+  };
   Sound.prototype.thump = function (v) {
     if (!this.ctx) return; var c = this.ctx, t = c.currentTime;
     var o = c.createOscillator(), g = c.createGain();

@@ -22,6 +22,7 @@
     'locked': 'Too many wrong tries. Wait a minute and try again.',
     'too-many': 'Too many new accounts from this connection today. Try again tomorrow.',
     'too-big': 'Your saved game is too big to store.',
+    'too-soon': 'That race was not counted: races less than 20 seconds apart.',
     'network': 'Could not reach the server. Check the internet and try again.',
     'not-found': 'The account service is not switched on yet. Try again later.'
   };
@@ -40,6 +41,37 @@
     $('btnAccount').textContent = auth ? auth.u : 'Log in';
     $('acOut').hidden = !auth; $('acIn').hidden = !!auth;
     if (auth) $('acName').textContent = auth.u;
+    drawElo();
+    if (TF.onAccount) TF.onAccount();
+  }
+  // ---- driver rating (one per class) ----
+  var elo = null, ELO_NAMES = { tford: 'Model T', gt3: 'GT3', lmp1: 'LMP1' };
+  function drawElo() {
+    var box = $('acElo'); if (!box) return;
+    box.textContent = '';
+    ['tford', 'gt3', 'lmp1'].forEach(function (c) {
+      var d = document.createElement('div'), a = document.createElement('span'), b = document.createElement('b');
+      a.textContent = ELO_NAMES[c]; b.textContent = elo ? String(Math.round(elo[c])) : '…';
+      d.appendChild(a); d.appendChild(b); box.appendChild(d);
+    });
+  }
+  function loadElo() {
+    if (!auth) { elo = null; return Promise.resolve(null); }
+    return api('/auth/elo', 'GET').then(function (r) { if (r.ok) { elo = r.r; drawElo(); } return elo; });
+  }
+  // a finished race: the server works out the new rating. res = { veh, n, p, laps, opp: [usernames] }
+  function race(res) {
+    if (!auth) return Promise.resolve(null);
+    return api('/auth/race', 'POST', res).then(function (r) {
+      if (!r.ok) return null;
+      if (elo) elo[r.veh] = r.r; else loadElo();
+      drawElo(); return r;
+    });
+  }
+  // sent while the page is closing (leaving mid-race counts as last): keepalive lets it finish after the tab is gone
+  function raceBeacon(res) {
+    if (!auth) return;
+    try { fetch(BASE + '/auth/race', { method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + auth.token }, body: JSON.stringify(res) }); } catch (e) { /* closing anyway */ }
   }
   function openPanel() { open = true; TF.uiLock = true; say(''); refresh(); $('account').hidden = false; var f = auth ? $('acLogout') : $('acUser'); if (f) f.focus(); }
   function closePanel() { open = false; TF.uiLock = false; $('account').hidden = true; if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }
@@ -78,17 +110,17 @@
       if (!r.ok) { say(MSG[r.err] || 'That did not work (' + (r.err || r.status) + ').', true); return; }
       auth = { u: r.user, token: r.token }; lsSet(AUTH_KEY, JSON.stringify(auth)); $('acPass').value = '';
       refresh(); say(create ? 'Account created. Your game is saved to it from now on.' : 'Logged in.');
-      if (!adopt(r.data, true)) syncBests();
+      if (!adopt(r.data, true)) { syncBests(); loadElo(); }
     });
   }
   function logout() {
     var a = auth; push(); // one last save
-    setTimeout(function () { api('/auth/logout', 'POST'); auth = null; lsDel(AUTH_KEY); lsDel(DIRTY_KEY); refresh(); say('Logged out. Your game stays on this computer.'); }, 400);
+    setTimeout(function () { api('/auth/logout', 'POST'); auth = null; elo = null; lsDel(AUTH_KEY); lsDel(DIRTY_KEY); refresh(); say('Logged out. Your game stays on this computer.'); }, 400);
   }
 
   // ---- global leaderboards ----
   var TABS = [['classic', 'tford', 'Model T', 'Classic speedway'], ['spa', 'gt3', 'GT3', 'Spa-Francorchamps'], ['spa', 'lmp1', 'LMP1', 'Spa-Francorchamps']];
-  var lbOpen = false, lbTab = 1, lbSeq = 0;
+  var lbOpen = false, lbTab = 1, lbSeq = 0, lbKind = 'lap';
   function fmtT(t) { var m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(2); }
   function sendLap(track, veh, t) {
     if (!auth || typeof t !== 'number') return Promise.resolve(null);
@@ -110,13 +142,13 @@
   function drawBoard(rows, msg) {
     var box = $('lbRows'); box.textContent = '';
     if (!rows) { box.textContent = msg || ''; return; }
-    if (!rows.length) { box.textContent = 'No laps yet. Log in and set the first one!'; return; }
+    if (!rows.length) { box.textContent = lbKind === 'elo' ? 'No ranked races yet. Log in, switch Ranked on and race!' : 'No laps yet. Log in and set the first one!'; return; }
     var me = auth ? auth.u.toLowerCase() : null;
     rows.forEach(function (r, i) {
       var d = document.createElement('div'); d.className = 'lb-row' + (me && r.n.toLowerCase() === me ? ' me' : '');
       var a = document.createElement('span'); a.textContent = (i + 1) + '.';
       var b = document.createElement('b'); b.textContent = r.n;
-      var c = document.createElement('em'); c.textContent = fmtT(r.t);
+      var c = document.createElement('em'); c.textContent = lbKind === 'elo' ? String(r.r) : fmtT(r.t);
       d.appendChild(a); d.appendChild(b); d.appendChild(c); box.appendChild(d);
     });
   }
@@ -124,8 +156,10 @@
     var tb = TABS[lbTab], seq = ++lbSeq;
     var tabs = document.querySelectorAll('#lbTabs button');
     for (var i = 0; i < tabs.length; i++) tabs[i].setAttribute('aria-checked', i === lbTab ? 'true' : 'false');
-    $('lbTrack').textContent = tb[3]; drawBoard(null, 'Loading...');
-    api('/auth/board?track=' + tb[0] + '&veh=' + tb[1], 'GET').then(function (r) {
+    var kinds = document.querySelectorAll('#lbKind button');
+    for (var k = 0; k < kinds.length; k++) kinds[k].setAttribute('aria-checked', kinds[k].dataset.kind === lbKind ? 'true' : 'false');
+    $('lbTrack').textContent = lbKind === 'elo' ? 'Driver rating · ' + tb[2] : tb[3]; drawBoard(null, 'Loading...');
+    api('/auth/board?' + (lbKind === 'elo' ? 'kind=elo&' : 'track=' + tb[0] + '&') + 'veh=' + tb[1], 'GET').then(function (r) {
       if (seq !== lbSeq) return;
       if (r.ok) drawBoard(r.rows); else drawBoard(null, MSG[r.err] || 'Could not load the list.');
     });
@@ -139,6 +173,7 @@
     $('lbBack').addEventListener('click', closeBoard);
     var tabs = document.querySelectorAll('#lbTabs button');
     for (var ti = 0; ti < tabs.length; ti++) (function (n) { tabs[n].addEventListener('click', function () { lbTab = n; loadBoard(); }); })(ti);
+    document.querySelectorAll('#lbKind button').forEach(function (b) { b.addEventListener('click', function () { lbKind = b.dataset.kind; loadBoard(); }); });
     window.addEventListener('keydown', function (e) { if (lbOpen && e.code === 'Escape') { e.preventDefault(); closeBoard(); } });
     $('btnAccount').addEventListener('click', openPanel);
     $('acBack').addEventListener('click', closePanel);
@@ -150,10 +185,11 @@
     window.addEventListener('keydown', function (e) { if (open && e.code === 'Escape') { e.preventDefault(); closePanel(); } });
     refresh();
     if (auth) api('/auth/data', 'GET').then(function (r) {
-      if (r.ok) { if (!adopt(r.data, false)) syncBests(); }
+      if (r.ok) { if (!adopt(r.data, false)) { syncBests(); loadElo(); } }
       else if (r.status === 401) { auth = null; lsDel(AUTH_KEY); refresh(); }
     });
   }
-  TF.account = { queue: queue, lap: lap, available: available, user: function () { return auth ? auth.u : null; } };
+  TF.account = { queue: queue, lap: lap, race: race, raceBeacon: raceBeacon, loadElo: loadElo,
+    ratings: function () { return elo; }, token: function () { return auth ? auth.token : null; }, available: available, user: function () { return auth ? auth.u : null; } };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();

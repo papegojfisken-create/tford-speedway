@@ -8,6 +8,23 @@ const NAME_RE = /^[A-Za-z0-9_]{3,20}$/;
 const BOARDS = { 'classic:tford': 1, 'spa:gt3': 1, 'spa:lmp1': 1 }; // circuit:car class
 const MIN_LAP = 15, MAX_LAP = 900;      // seconds; anything outside this is not a real lap
 
+// Driver rating (Elo), one per car class. A race is a set of duels against every other car in your class;
+// AI cars count as a 1000-rated driver, real players with their own rating. See the plan page for the numbers.
+const CLASSES = ['tford', 'gt3', 'lmp1'], START_R = 1000, AI_R = 1000, ELO_K = 16, ELO_S = 550, FLOOR_R = 100;
+async function ratings(storage, lower) {
+  const r = (await storage.get('elo:' + lower)) || {}, out = {};
+  for (const c of CLASSES) out[c] = typeof r[c] === 'number' ? r[c] : START_R;
+  return out;
+}
+export function eloChange(R, opps, n, p, laps) { // opps: ratings of the real players among the n-1 opponents
+  let exp = 0;
+  for (let i = 0; i < n - 1; i++) exp += 1 / (1 + Math.pow(10, ((i < opps.length ? opps[i] : AI_R) - R) / ELO_S));
+  const lf = Math.sqrt(Math.min(laps, 20) / 10);
+  let d = ELO_K * lf * ((n - p) - exp) / Math.sqrt(n - 1);
+  if (d > 0) d = Math.max(1, d); // a gain is never smaller than +1
+  return d;
+}
+
 function json(obj, status = 200) { return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json' } }); }
 const err = (code, status = 400) => json({ err: code }, status);
 
@@ -100,6 +117,41 @@ export async function handleAuth(storage, request, ip) {
   }
 
   // Global leaderboards: one list per car class on its circuit (the best lap of each player; top 100 kept).
+  if (path === '/auth/board' && get && new URL(request.url).searchParams.get('kind') === 'elo') {
+    const veh = new URL(request.url).searchParams.get('veh');
+    if (CLASSES.indexOf(veh) < 0) return err('bad-board');
+    const rows = (await storage.get('eb:' + veh)) || [];
+    return json({ ok: 1, rows: rows.slice(0, 50).map((r) => ({ n: r.n, r: Math.round(r.r) })) });
+  }
+  if (path === '/auth/elo' && get) {
+    const who = await userFromToken(storage, request);
+    if (!who) return err('auth', 401);
+    return json({ ok: 1, r: await ratings(storage, who.lower) });
+  }
+  if (path === '/auth/race' && post) {
+    const who = await userFromToken(storage, request);
+    if (!who) return err('auth', 401);
+    let b; try { b = await request.json(); } catch (e) { return err('bad-request'); }
+    const veh = b.veh, n = b.n, p = b.p, laps = b.laps, opp = Array.isArray(b.opp) ? b.opp : [];
+    const int = (v, a, c) => Number.isInteger(v) && v >= a && v <= c;
+    if (CLASSES.indexOf(veh) < 0 || !int(n, 3, 40) || !int(p, 1, n) || !int(laps, 1, 50) || opp.length > Math.min(9, n - 1)) return err('bad-race');
+    const now = Date.now(), lastK = 'elot:' + who.lower, last = (await storage.get(lastK)) || 0;
+    if (now - last < 20000) return err('too-soon', 429); // one result per race, not a stream of them
+    const all = await ratings(storage, who.lower), R = all[veh], seen = {}, oppR = [];
+    for (const nm of opp) {
+      if (typeof nm !== 'string') continue;
+      const l = nm.toLowerCase(); if (l === who.lower || seen[l]) continue; seen[l] = 1;
+      oppR.push((await storage.get('u:' + l)) ? (await ratings(storage, l))[veh] : AI_R);
+    }
+    const d = eloChange(R, oppR, n, p, laps), nr = Math.round(Math.max(FLOOR_R, R + d) * 10) / 10;
+    all[veh] = nr;
+    await storage.put('elo:' + who.lower, all); await storage.put(lastK, now);
+    const bk = 'eb:' + veh, rows = ((await storage.get(bk)) || []).filter((r) => r.u !== who.lower), user = await storage.get('u:' + who.lower);
+    rows.push({ u: who.lower, n: user ? user.name : who.lower, r: nr });
+    rows.sort((a, c) => c.r - a.r); if (rows.length > 100) rows.length = 100;
+    await storage.put(bk, rows);
+    return json({ ok: 1, veh, r: nr, d: Math.round((nr - R) * 10) / 10 });
+  }
   if (path === '/auth/board' && get) {
     const q = new URL(request.url).searchParams, key = q.get('track') + ':' + q.get('veh');
     if (!BOARDS[key]) return err('bad-board');

@@ -64,11 +64,11 @@
     };
   }
   // connect to the relay room for this code; cb(error) or cb(null)
-  function relayRoom(code, asHost, cb) {
+  function relayRoom(code, asHost, cb, query) {
     var ws, others = {}, done = false, live = false;
     function finish(e) { if (!done) { done = true; clearTimeout(timer); cb(e); } }
     var timer = setTimeout(function () { try { ws.close(); } catch (e) { /* fine */ } finish('timeout'); }, 12000);
-    try { ws = new WebSocket(RELAY + '/room/' + code + (asHost ? '?host=1' : '')); } catch (e) { return finish('load'); }
+    try { ws = new WebSocket(RELAY + '/room/' + code + (asHost ? '?host=1' : query || '')); } catch (e) { return finish('load'); }
     function lost() {
       if (!live) return; live = false;
       net.code = null; drop(); if (net.onLost) net.onLost();
@@ -96,11 +96,14 @@
     relayRoom(code, true, function (err) { if (err) cb(err); else cb(null, code); });
   };
   // cb(error) or cb(null)
-  net.joinGame = function (code, cb) {
+  net.joinGame = function (code, cb, query) { // query: extra '?...' for the ranked public server (login token and class)
     code = String(code || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     if (code.length !== 5) return cb('code');
-    relayRoom(code, false, cb);
+    relayRoom(code, false, cb, query);
   };
+  // the two public servers: always open, fixed settings (see relay/src/index.js)
+  net.PUBLIC = { PUBLC: { name: 'Spa Open', ranked: false }, RANKD: { name: 'Spa Ranked', ranked: true, min: 1250 } };
+  net.status_url = RELAY.replace('wss:', 'https:') + '/status';
 
   // send my state; failures are normal (not connected yet, not allowed) and must never break the game
   net.send = function (obj) {
