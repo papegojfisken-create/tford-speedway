@@ -39,6 +39,7 @@
   function finish(t, cfg) {
     var PX = t.PX, PZ = t.PZ, PH = t.PH, PS = t.PS, PK = t.PK, PB = t.PB, GL = t.GL, GR = t.GR, KB = t.KB, segs = t.segs;
     var N = PX.length, LAP = t.s, closeErr = Math.hypot(t.x - PX[0], t.z - PZ[0]), i;
+    var HW = cfg.hw || 7; // half the road width: 7 m on the race circuits, wider for drifting
 
     // sloped ramp kerbs on the inside of each slow corner. SA[i] = which side is the inside at sample i (-1 left, +1 right, 0 none)
     var SA = new Int8Array(N), corners = [];
@@ -113,7 +114,7 @@
       if (!r) { r = scan(px, pz, 0, N, 4); r = scan(px, pz, r[0] - 5, 11, 1); }
       var i = r[0], c = Math.cos(PH[i]), sn = Math.sin(PH[i]), dx = px - PX[i], dz = pz - PZ[i];
       var d = dx * sn + dz * c, sv = PS[i] + dx * c - dz * sn, b = PB[i];
-      var surface = Math.abs(d) <= 8 ? 'road' : ((d > 8 && d < 8 + GR[i]) || (d < -8 && d > -8 - GL[i])) ? 'gravel' : 'grass';
+      var E = HW + 1, surface = Math.abs(d) <= E ? 'road' : ((d > E && d < E + GR[i]) || (d < -E && d > -E - GL[i])) ? 'gravel' : 'grass';
       return { s: ((sv % LAP) + LAP) % LAP, d: d, b: b, nx: sn, nz: c, tx: c, tz: -sn, y: height(d, b), surface: surface, k: PK[i],
         rs: SA[i], rd: d * SA[i], rh: SA[i] ? rampH(d * SA[i]) : 0 }; // inside ramp kerb: side, distance towards the inside, height here
     }
@@ -144,7 +145,7 @@
       // barriers run along both sides of the road. Out in the open they stand back past the gravel; where the road is banked,
       // the barrier on the high side moves in to the top edge of the banking so nobody drives off it.
       var BR = new Float32Array(N), BL = new Float32Array(N), B0 = new Float32Array(N), C0 = new Float32Array(N);
-      for (i = 0; i < N; i++) { B0[i] = Math.max(14, 8 + GR[i] + 5); C0[i] = Math.max(14, 8 + GL[i] + 5); }
+      for (i = 0; i < N; i++) { B0[i] = Math.max(HW + 7, HW + 1 + GR[i] + 5); C0[i] = Math.max(HW + 7, HW + 1 + GL[i] + 5); }
       for (i = 0; i < N; i++) { // smooth over 24 m so the barrier does not jump
         var sr = 0, sl = 0; for (var q = -24; q <= 24; q++) { var ii = (i + q + N) % N; sr += B0[ii]; sl += C0[ii]; }
         BR[i] = sr / 49; BL[i] = sl / 49;
@@ -203,7 +204,7 @@
     var maxBank = 0; for (i = 0; i < N; i++) if (Math.abs(PB[i]) > maxBank) maxBank = Math.abs(PB[i]);
 
     return {
-      id: cfg.id, name: cfg.name, kind: cfg.oval ? 'oval' : 'circuit', HW: HW, BANK_GRIP: BANK_GRIP, LAP: LAP, LINE: cfg.line, START: cfg.start, N: N, segs: segs, corners: corners, zones: zones,
+      id: cfg.id, name: cfg.name, kind: cfg.oval ? 'oval' : 'circuit', HW: HW, drift: !!cfg.drift, lot: !!cfg.lot, BANK_GRIP: BANK_GRIP, LAP: LAP, LINE: cfg.line, START: cfg.start, N: N, segs: segs, corners: corners, zones: zones,
       RAMP0: RAMP0, RAMP1: RAMP1, RAMPH: RAMPH, RAMPBACK: RAMPBACK, closeErr: closeErr, OVAL_LAP: OVAL_LAP, ovalPoint: ovalPoint, bounds: bounds, maxBank: maxBank,
       tp: tp, pos: pos, locate: locate, wrap: wrap, stadium: stadium, barrierDist: barrierDist, vAt: vAt, makeProfile: makeProfile, makeLineProfile: makeLineProfile, lineOffset: lineOffset, racingLine: racingLine, sample: sample, outline: outline, idx: idx,
       raw: { PX: PX, PZ: PZ, PH: PH, PS: PS, PK: PK, PB: PB }
@@ -308,8 +309,63 @@
       { id: 'spa', name: 'Spa-Francorchamps', line: 190, start: 100 });
   }
 
-  var builders = { classic: buildClassic, spa: buildSpa }, cache = {};
-  TF.tracks = ['classic', 'spa'];
+  // ---------- drifting: a twisty drift track and a big parking lot ----------
+  // A closed, smooth centre line through hand-placed points (centripetal Catmull-Rom, like Spa), flat, with kerbs at the slow corners.
+  function fromPoints(P, cfg) {
+    var n = P.length, dense = [], i, j;
+    function seg(p0, p1, p2, p3) {
+      var t0 = 0, t1 = t0 + Math.sqrt(Math.hypot(p1[0] - p0[0], p1[1] - p0[1])), t2 = t1 + Math.sqrt(Math.hypot(p2[0] - p1[0], p2[1] - p1[1])), t3 = t2 + Math.sqrt(Math.hypot(p3[0] - p2[0], p3[1] - p2[1]));
+      var len = Math.hypot(p2[0] - p1[0], p2[1] - p1[1]), m = Math.max(1, Math.ceil(len / 0.4));
+      for (var s = 0; s < m; s++) {
+        var u = t1 + (t2 - t1) * s / m, r = [0, 0];
+        for (var c = 0; c < 2; c++) {
+          var A1 = (t1 - u) / (t1 - t0) * p0[c] + (u - t0) / (t1 - t0) * p1[c], A2 = (t2 - u) / (t2 - t1) * p1[c] + (u - t1) / (t2 - t1) * p2[c], A3 = (t3 - u) / (t3 - t2) * p2[c] + (u - t2) / (t3 - t2) * p3[c];
+          var B1 = (t2 - u) / (t2 - t0) * A1 + (u - t0) / (t2 - t0) * A2, B2 = (t3 - u) / (t3 - t1) * A2 + (u - t1) / (t3 - t1) * A3;
+          r[c] = (t2 - u) / (t2 - t1) * B1 + (u - t1) / (t2 - t1) * B2;
+        }
+        dense.push(r);
+      }
+    }
+    for (i = 0; i < n; i++) seg(P[(i + n - 1) % n], P[i], P[(i + 1) % n], P[(i + 2) % n]);
+    var m = dense.length, acc = [0];
+    for (i = 1; i <= m; i++) { var da = dense[i - 1], db = dense[i % m]; acc.push(acc[i - 1] + Math.hypot(db[0] - da[0], db[1] - da[1])); }
+    var LAP0 = acc[m], N = Math.round(LAP0 / STEP), step = LAP0 / N, PX = [], PZ = [], PH = [], PS = [], PB = [], GL = [], GR = [], KB = [];
+    j = 0;
+    for (i = 0; i < N; i++) {
+      var target = i * step; while (j < m - 1 && acc[j + 1] < target) j++;
+      var f = (target - acc[j]) / ((acc[j + 1] - acc[j]) || 1), a0 = dense[j], b0 = dense[(j + 1) % m];
+      PX.push(a0[0] + (b0[0] - a0[0]) * f); PZ.push(a0[1] + (b0[1] - a0[1]) * f); PS.push(i * step); PB.push(0); GL.push(0); GR.push(0); KB.push(0);
+    }
+    for (i = 0; i < N; i++) { var a1 = (i - 2 + N) % N, b1 = (i + 2) % N; PH[i] = Math.atan2(-(PZ[b1] - PZ[a1]), PX[b1] - PX[a1]); }
+    var K0 = []; for (i = 0; i < N; i++) K0[i] = wrapPi(PH[(i + 3) % N] - PH[(i - 3 + N) % N]) / (6 * step);
+    var PK = [], w = 8; for (i = 0; i < N; i++) { var sum = 0; for (var q = -w; q <= w; q++) sum += K0[(i + q + N) % N]; PK[i] = sum / (2 * w + 1); }
+    // kerbs and a strip of gravel on the outside of the slow corners
+    var segs = {}, runs = [], inRun = false, a = 0;
+    for (i = 0; i <= N; i++) {
+      var slow = i < N && Math.abs(PK[i]) > 1 / 45;
+      if (slow && !inRun) { a = i; inRun = true; } else if (!slow && inRun) { inRun = false; if (i - a >= 10) runs.push([a, i]); }
+    }
+    runs.forEach(function (r, ix) {
+      for (var qq = Math.max(0, r[0] - 16); qq <= Math.min(N - 1, r[1] + 16); qq++) { KB[qq] = 1; if (PK[qq] > 0) GR[qq] = 10; else if (PK[qq] < 0) GL[qq] = 10; }
+      segs['k' + ix] = { s0: PS[Math.max(0, r[0] - 16)], s1: PS[Math.min(N - 1, r[1] + 16)] };
+    });
+    return finish({ PX: PX, PZ: PZ, PH: PH, PS: PS, PK: PK, PB: PB, GL: GL, GR: GR, KB: KB, segs: segs, s: N * step, x: PX[0], z: PZ[0] }, cfg);
+  }
+  // the drift track: about 1.3 km of hairpins, an S, a long sweeper and a fast double-apex corner, 18 m wide
+  function buildDrift() {
+    return fromPoints([[0, 0], [150, 0], [210, -20], [230, -70], [200, -110], [150, -100], [120, -60], [80, -70], [60, -120], [90, -170], [160, -180],
+      [260, -160], [320, -110], [330, -30], [300, 40], [220, 70], [120, 60], [40, 70], [-40, 60], [-70, 20], [-50, -10]],
+      { id: 'drift', name: 'Drift track', line: 40, start: 20, hw: 9, drift: true });
+  }
+  // the parking lot: a loop so wide (88 m) that it is one big open sheet of tarmac, about 310 x 190 m, with a small island in the middle
+  function buildLot() {
+    var t = newTurtle(0, 0, 0);
+    t.line(120); t.arc(50, 180); t.line(120); t.arc(50, 180);
+    return finish(t, { id: 'lot', name: 'Parking lot', line: 30, start: 10, hw: 44, drift: true, lot: true });
+  }
+
+  var builders = { classic: buildClassic, spa: buildSpa, drift: buildDrift, lot: buildLot }, cache = {};
+  TF.tracks = ['classic', 'spa', 'drift', 'lot'];
   TF.Track = {};
   TF.setTrack = function (id) {
     if (!builders[id]) id = 'classic';

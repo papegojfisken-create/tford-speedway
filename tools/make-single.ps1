@@ -6,7 +6,7 @@ function ReadText($rel) { [IO.File]::ReadAllText((Join-Path $root $rel), [Text.E
 
 $html = ReadText 'index.html'
 $css = ReadText 'style.css'
-$files = 'js/lib/three.min.js', 'js/spadata.js', 'js/track.js', 'js/physics.js', 'js/world.js', 'js/tford.js', 'js/gt3.js', 'js/p963data.js', 'js/p911data.js', 'js/gt3_ferrari.js', 'js/gt3_bmw.js', 'js/gt3_audi.js', 'js/gt3_mclaren.js', 'js/gt3_aston.js', 'js/lmp1.js', 'js/effects.js', 'js/audio.js', 'js/net.js', 'js/account.js', 'js/game.js'
+$files = 'js/lib/three.min.js', 'js/spadata.js', 'js/track.js', 'js/physics.js', 'js/world.js', 'js/tford.js', 'js/gt3.js', 'js/miata_data.js', 'js/miata.js', 'js/p963data.js', 'js/p911data.js', 'js/gt3_ferrari.js', 'js/gt3_bmw.js', 'js/gt3_audi.js', 'js/gt3_mclaren.js', 'js/gt3_aston.js', 'js/lmp1.js', 'js/effects.js', 'js/audio.js', 'js/net.js', 'js/account.js', 'js/game.js'
 # what boot.js normally sets up before the game files load
 $js = "window.TF = window.TF || {}; window.TF.fatal = function (m) { var f = document.getElementById('fatal'); f.textContent = m; f.hidden = false; };`n"
 foreach ($f in $files) {

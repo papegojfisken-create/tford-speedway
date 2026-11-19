@@ -5,12 +5,12 @@
 const ITER = 60000;                       // how many rounds of hashing; slow on purpose so guessing passwords is expensive
 const TOKEN_DAYS = 30, MAX_TOKENS = 5, MAX_DATA = 1000000, CHUNK = 100000;
 const NAME_RE = /^[A-Za-z0-9_]{3,20}$/;
-const BOARDS = { 'classic:tford': 1, 'spa:gt3': 1, 'spa:lmp1': 1 }; // circuit:car class
+const BOARDS = { 'classic:tford': 1, 'spa:miata': 1, 'spa:gt3': 1, 'spa:lmp1': 1 }; // circuit:car class
 const MIN_LAP = 15, MAX_LAP = 900;      // seconds; anything outside this is not a real lap
 
 // Driver rating (Elo), one per car class. A race is a set of duels against every other car in your class;
 // AI cars count as a 1000-rated driver, real players with their own rating. See the plan page for the numbers.
-const CLASSES = ['tford', 'gt3', 'lmp1'], START_R = 1000, AI_R = 1000, ELO_K = 16, ELO_S = 550, FLOOR_R = 100;
+const CLASSES = ['tford', 'miata', 'gt3', 'lmp1'], START_R = 1000, AI_R = 1000, ELO_K = 16, ELO_S = 550, FLOOR_R = 100;
 async function ratings(storage, lower) {
   const r = (await storage.get('elo:' + lower)) || {}, out = {};
   for (const c of CLASSES) out[c] = typeof r[c] === 'number' ? r[c] : START_R;

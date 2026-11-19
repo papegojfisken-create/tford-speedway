@@ -127,9 +127,9 @@
         for (var cr = 0; cr < 6; cr++) { x.strokeStyle = 'rgba(10,10,12,.35)'; x.lineWidth = 1; x.beginPath(); var cx = rnd() * w, cy = rnd() * h; x.moveTo(cx, cy); x.lineTo(cx + (rnd() - .5) * 60, cy + (rnd() - .5) * 60); x.stroke(); } // hairline cracks
       });
       band(-HW, HW, 0, std({ map: asphalt, roughness: .92 }));
-      band(-6.85, -6.6, 0.015, paintMat({ color: 0xf1ecdf }));
-      band(6.6, 6.85, 0.015, paintMat({ color: 0xf1ecdf }));
-      if (K.kind !== 'oval') {
+      band(-(HW - .15), -(HW - .4), 0.015, paintMat({ color: 0xf1ecdf }));
+      band(HW - .4, HW - .15, 0.015, paintMat({ color: 0xf1ecdf }));
+      if (K.kind !== 'oval' && !K.drift) {
         // the racing line: rubber laid down by the cars makes the ideal line darker and smoother than the rest of the road
         var rubber = canvasTex(64, 8, function (x, w, h) { var g = x.createLinearGradient(0, 0, w, 0); g.addColorStop(0, 'rgba(0,0,0,0)'); g.addColorStop(.5, 'rgba(0,0,0,.34)'); g.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = g; x.fillRect(0, 0, w, h); });
         var rubberM = new T.MeshBasicMaterial({ map: rubber, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
@@ -162,7 +162,15 @@
       });
       var chk = canvasTex(140, 20, function (x) { x.fillStyle = '#f4f1e8'; x.fillRect(0, 0, 140, 20); x.fillStyle = '#151515'; for (var i = 0; i < 14; i++) x.fillRect(i * 10, (i % 2) * 10, 10, 10); });
       chk.magFilter = T.NearestFilter;
-      band(-HW, HW, 0.018, paintMat({ map: chk }), K.LINE - 0.9, K.LINE + 0.9, 2, 1 / 1.8);
+      if (!K.drift) band(-HW, HW, 0.018, paintMat({ map: chk }), K.LINE - 0.9, K.LINE + 0.9, 2, 1 / 1.8); // (no start line when drifting: there are no laps)
+      if (K.lot) { // the parking lot: rows of painted parking bays and two driving lanes, repeating every 24 m
+        var bays = canvasTex(256, 256, function (x, w, h) {
+          x.clearRect(0, 0, w, h); x.fillStyle = 'rgba(241,236,223,.9)';
+          [.08, .3, .55, .77].forEach(function (u) { for (var v = 0; v < 4; v++) x.fillRect(u * w, v * h / 4, w * .13, 3); x.fillRect((u + .13) * w - 2, 0, 3, h); }); // bays: a long line with short dividers
+          x.fillStyle = 'rgba(241,236,223,.55)'; [.24, .45, .7, .92].forEach(function (u) { for (var v = 0; v < 8; v++) x.fillRect(u * w, v * h / 8, 3, h / 16); }); // dashed lane lines
+        });
+        band(-(HW - 1), HW - 1, 0.01, paintMat({ map: bays, transparent: true }), 0, LAP, Math.round(LAP / 2), 1 / 24);
+      }
 
       // sloped ramp kerbs on the inside of the slow corners: they rise away from the track and drop off at the back
       var rampM = std({ map: kerbTex, roughness: .8, side: T.DoubleSide }), rampBackM = std({ color: 0xe9e4d8, roughness: .8, side: T.DoubleSide });
@@ -272,9 +280,10 @@
         var adM = std({ map: adTex, roughness: .7, side: T.DoubleSide, alphaTest: .5 });
         var nearStart = function (s) { var d = Math.abs(K.wrap(s - K.START)); return d < 450; }; // concrete wall along the pit straight, armco everywhere else
         [-1, 1].forEach(function (side) {
+          if (K.lot && side < 0) return; // the parking lot's inside is a small island, not a barrier
           var at = function (h) { return function (s) { return K.pos(s, side * K.barrierDist(s, side), h); }; };
           var atIn = function (h) { return function (s) { return K.pos(s, side * (K.barrierDist(s, side) - .1), h); }; };
-          var n = Math.round(LAP / 1.5), sA = K.START - 450, sB = K.START + 450;
+          var n = Math.round(LAP / 1.5), sA = K.START - (K.drift ? 0 : 450), sB = K.START + (K.drift ? 0 : 450); // (drifting: armco all the way round, no pit wall)
           var w = new T.Mesh(strip(sA, sB, Math.round(900 / 1.5), at(-0.3), at(1.15), 1 / 6), wallM); w.castShadow = true; w.receiveShadow = true; scene.add(w);
           var arm = new T.Mesh(strip(sB, sA + LAP, Math.round((LAP - 900) / 1.5), at(-0.05), at(0.85), 1 / 8), armcoM); arm.castShadow = true; arm.receiveShadow = true; scene.add(arm);
           scene.add(new T.Mesh(strip(0, LAP, n, at(1.15), at(5.2), 1 / 3.5), fenceM));
@@ -314,6 +323,7 @@
           var rf = bx(len + 6, 0.5, rows * 1.75 + 6, roofM, x0, top + 0.4, sign * (back - rows * 0.9 - 1), sh); rf.rotation.x = sign * 0.07;
           bx(len * 0.18, 3.2, 4, std({ color: 0x30404f, roughness: .2, metalness: .6, emissive: 0x4a3a22, emissiveIntensity: .6 }), x0, top + 2.4, sign * (back - 1), sh);
         };
+        if (!K.drift) { // (the drift places have no pits, start gantry or main grandstand)
         standHere(1, 280, 11, 22, -20);
         standHere(-1, 160, 5, 26, -60);
         bx(180, 5, 12, std({ color: 0xe4dfd3, roughness: .8 }), -60, 2.5, -24, false);        // pit building
@@ -322,6 +332,7 @@
         bx(.8, 9, .8, postM, 0, 4.5, 12.5); bx(.8, 9, .8, postM, 0, 4.5, -12.5);              // gantry over the start line
         bx(2, 1.4, 27, std({ color: 0x1b1f26, roughness: .5 }), 0, 9.6, 0);
         bx(2.2, 1, 12, std({ color: 0xf2b705, emissive: 0xf2b705, emissiveIntensity: .35, roughness: .5 }), 0, 9.6, 0);
+        }
 
         // forest along both sides. A coarse grid of the centre line tells us quickly whether a spot is close to the track.
         var cells = {}, raw = K.raw, cs = 40;
@@ -357,8 +368,10 @@
           for (var pp = -len / 2; pp <= len / 2; pp += len / 4) sb(.4, top - 2.5, .4, concrete, pp, (top - 2.5) / 2, side * (back - .6), shd); // roof posts
           standSpots.push({ x: ctr.x, z: ctr.z });
         };
-        K.corners.forEach(function (c, ci) { if (ci % 2 === 0) buildStand((c.s0 + c.s1) / 2, -c.side, 70 + (ci % 3) * 10, 6 + (ci % 3)); });
-        [.17, .33, .52, .68, .85].forEach(function (f, fi) { buildStand(f * LAP, fi % 2 ? 1 : -1, 90, 7); });
+        if (!K.drift) {
+          K.corners.forEach(function (c, ci) { if (ci % 2 === 0) buildStand((c.s0 + c.s1) / 2, -c.side, 70 + (ci % 3) * 10, 6 + (ci % 3)); });
+          [.17, .33, .52, .68, .85].forEach(function (f, fi) { buildStand(f * LAP, fi % 2 ? 1 : -1, 90, 7); });
+        } else if (!K.lot) buildStand(.5 * LAP, 1, 60, 5); // the drift track: one small stand for the spectators
         var nearStand = function (px, pz) { for (var q2 = 0; q2 < standSpots.length; q2++) if (Math.hypot(px - standSpots[q2].x, pz - standSpots[q2].z) < 55) return true; return false; };
 
         // spruce trees: a trunk and two tiers of branches, in several shades of green, close behind the barriers and thinning out with distance
@@ -368,7 +381,7 @@
         var dm = new T.Object3D(), placed = 0, greens = [0x23452a, 0x2b5030, 0x1d3d25, 0x34602f, 0x2a4a2b, 0x3f6a38];
         var setPart = function (mesh, i, x, y, z, sc, ry, col) { dm.position.set(x, y, z); dm.scale.set(sc, sc, sc); dm.rotation.set(0, ry, 0); dm.updateMatrix(); mesh.setMatrixAt(i, dm.matrix); if (col) mesh.setColorAt(i, col); };
         for (var tries = 0; tries < treeN * 8 && placed < treeN; tries++) {
-          var ts = rnd() * LAP, tside = rnd() < .5 ? -1 : 1, off = 12 + Math.pow(rnd(), 1.6) * 110, bd = K.barrierDist(ts, tside);
+          var ts = rnd() * LAP, tside = K.lot || rnd() >= .5 ? 1 : -1, off = 12 + Math.pow(rnd(), 1.6) * 110, bd = K.barrierDist(ts, tside); // (the lot: trees only round the outside)
           if (off < bd + 6) continue;                                                              // not in the run-off area
           var tpnt = K.pos(ts, tside * off, 0);
           if (nearTrack(tpnt.x, tpnt.z, 16)) continue;                                             // too close to some other part of the track

@@ -51,8 +51,8 @@
     var self = this;
     function engineLoop(kind) {
       var R0 = 3000, cyc = 120 / R0, nC = 30, sr = c.sampleRate, n = Math.floor(cyc * nC * sr), b = c.createBuffer(1, n, sr), d = b.getChannelData(0);
-      var cyl = kind === 'lmp1' ? 8 : 6, amp = kind === 'lmp1' ? [1, .78, .93, .7, .97, .82, .9, .74] : [1, .9, 1, .9, 1, .9];
-      var seed = kind === 'lmp1' ? 99 : 7; function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+      var cyl = kind === 'lmp1' ? 8 : kind === 'miata' ? 4 : 6, amp = kind === 'lmp1' ? [1, .78, .93, .7, .97, .82, .9, .74] : kind === 'miata' ? [1, .93, .97, .9] : [1, .9, 1, .9, 1, .9]; // Miata: an in-line four, 2 firings per turn
+      var seed = kind === 'lmp1' ? 99 : kind === 'miata' ? 31 : 7; function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
       var L = Math.floor(.014 * sr);
       for (var q = 0; q < nC; q++) {
         var ca = 1 + (rnd() - .5) * .14;
@@ -71,7 +71,7 @@
       var g2 = gain(0, hp); src.connect(g2);
       return { src: src, g: g2 };
     }
-    this.eng = { gt3: engineLoop('gt3'), lmp1: engineLoop('lmp1') };
+    this.eng = { gt3: engineLoop('gt3'), lmp1: engineLoop('lmp1'), miata: engineLoop('miata') };
     this.gtNoiseG = gain(0, gt); this.gtBP = filter('bandpass', 1200, 0.9, this.gtNoiseG); noise().connect(this.gtBP);
     this.whineG = gain(0, master); this.whine = c.createOscillator(); this.whine.type = 'sine'; this.whine.connect(this.whineG); this.whine.start();
     this.lastThr = 0;
@@ -93,8 +93,8 @@
       var thr = o.thr, cup = this.kind === 'gt3'; // the GT3 is a Porsche 992 GT3 Cup style flat-six: free-revving, screaming to about 8,500 rpm
       var rr = cup ? o.rpm * 0.95 : o.rpm;
       this.engGain.gain.setTargetAtTime(0, t, 0.05);
-      var on = this.eng[cup ? 'gt3' : 'lmp1'], off = this.eng[cup ? 'lmp1' : 'gt3'];
-      on.src.playbackRate.setTargetAtTime(Math.max(.2, rr / 3000), t, 0.03); on.g.gain.setTargetAtTime(1, t, 0.05); off.g.gain.setTargetAtTime(0, t, 0.05);
+      var self2 = this, on = this.eng[this.kind] || this.eng.gt3; Object.keys(this.eng).forEach(function (k) { if (self2.eng[k] !== on) self2.eng[k].g.gain.setTargetAtTime(0, t, 0.05); });
+      on.src.playbackRate.setTargetAtTime(Math.max(.2, rr / 3000), t, 0.03); on.g.gain.setTargetAtTime(1, t, 0.05);
       this.gtPre.gain.setTargetAtTime(0.55 + thr * 0.75, t, 0.05); // on the throttle the pulses are harder: more rasp from the clipper
       this.gtLP.frequency.setTargetAtTime(700 + rr * (cup ? 0.55 : 0.45) + thr * 1600, t, 0.06);
       this.gtGain.gain.setTargetAtTime(0.16 + thr * 0.14, t, 0.05);
@@ -150,7 +150,7 @@
   Sound.prototype.horn = function () {
     if (!this.ctx) return; var c = this.ctx, t = c.currentTime;
     if (this.hornUntil && t < this.hornUntil) return; this.hornUntil = t + 1.0;
-    if (this.profile === 'gt3') { // a short two-tone beep
+    if (this.profile !== 'tford') { // a short two-tone beep
       var h1 = c.createOscillator(), h2 = c.createOscillator(), hg = c.createGain();
       h1.type = 'square'; h2.type = 'square'; h1.frequency.value = 415; h2.frequency.value = 523;
       hg.gain.setValueAtTime(0.0001, t); hg.gain.linearRampToValueAtTime(0.14, t + 0.02); hg.gain.setValueAtTime(0.14, t + 0.4); hg.gain.linearRampToValueAtTime(0.0001, t + 0.47);

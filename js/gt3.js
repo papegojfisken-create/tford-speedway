@@ -7,7 +7,7 @@
 
   // one builder for any vehicle id
   TF.buildVehicle = function (veh, color, ghost, number, ai) { // ai: a computer-driven car; its detailed body does not cast a shadow (saves a lot of drawing)
-    return veh === 'lmp1' ? TF.buildLmp1(color, ghost, number, ai) : veh === 'gt3' ? TF.buildGt3(color, ghost, number, ai) : TF.buildCar(color, ghost, number);
+    return veh === 'lmp1' ? TF.buildLmp1(color, ghost, number, ai) : veh === 'gt3' ? TF.buildGt3(color, ghost, number, ai) : veh === 'miata' || veh === 'dmiata' ? TF.buildMiata(color, ghost, number, ai) : veh === 'dgt3' ? TF.buildGt3(color, ghost, number, ai) : TF.buildCar(color, ghost, number);
   };
 
   // The white paint is the Porsche one: it also gets the Porsche details (911 front and wing on the GT3, 919 livery on the LMP1)

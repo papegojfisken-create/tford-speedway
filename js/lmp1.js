@@ -440,10 +440,7 @@
         sp.position.set(-2.8, .42, s * .2); sp.scale.set(1.4, 1.4, 1); g.add(sp); flames.push(sp);
       });
     }
-    function setBoost(v) {
-      if (ghost) return;
-      for (var i = 0; i < flames.length; i++) { flames[i].material.opacity = v; var k = 1.1 + v * 1.1 + Math.random() * .3 * v; flames[i].scale.set(k, k, 1); }
-    }
+    function setBoost(v) { } // (the boost used to light a glow behind the car; it now works without the light, as asked)
 
     var legs = { L: new T.Group(), R: new T.Group() };
     wheels.forEach(function (w) { TF.mergeGroup(w.spin); });

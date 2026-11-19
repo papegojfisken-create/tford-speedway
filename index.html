@@ -33,6 +33,7 @@
   </div>
   <div class="h-speed" id="speedo"></div>
   <div class="h-draft" id="hDraft">SLIPSTREAM</div>
+  <div class="h-drift" id="hDriftAng"></div>
   <div class="h-boost" id="hBoost" hidden><span>BOOST</span><div class="bar"><i id="hBoostFill"></i></div></div>
 </div>
 <div id="toast" hidden></div>
@@ -54,7 +55,8 @@
   <button type="button" id="btnBoard" class="settings-btn account-btn lb-btn">Leaderboards</button>
   <button type="button" id="btnServers" class="settings-btn account-btn srv-btn" hidden>Servers</button>
   <button type="button" id="btnLmp" class="lmp-btn" hidden>Switch to LMP1</button>
-  <div class="credit">3D models from Sketchfab, simplified for this game: LMP1 "Porsche 963 LMDh Hypercar" by kilianhoffmann13 · Porsche "911 (992) GT3R" by kevin · Ferrari "2018 Ferrari 488 GT3" and McLaren "2015 McLaren 650S GT3" by Ddiaz Design · Aston Martin "Aston Martin Vantage GT3" by Design Studio Poland (all CC-BY-4.0) · BMW "2025 BMW M4 GT3 EVO G82" by Ddiaz Design and Audi "2009 Audi R8 LMS" by OUTPISTON (both CC-BY-NC-SA-4.0: non-commercial use only)</div>
+  <button type="button" id="btnSpa2" class="lmp-btn lmp-btn2" hidden>Switch to GT3</button>
+  <div class="credit">3D models from Sketchfab, simplified for this game: LMP1 "Porsche 963 LMDh Hypercar" by kilianhoffmann13 · Porsche "911 (992) GT3R" by kevin · Ferrari "2018 Ferrari 488 GT3" and McLaren "2015 McLaren 650S GT3" by Ddiaz Design · Aston Martin "Aston Martin Vantage GT3" by Design Studio Poland (all CC-BY-4.0) · BMW "2025 BMW M4 GT3 EVO G82" by Ddiaz Design and Audi "2009 Audi R8 LMS" by OUTPISTON (both CC-BY-NC-SA-4.0: non-commercial use only) · Miata Cup "1989 mazda miata mx-5 (na)" by amogusstrikesback2 (CC-BY-4.0)</div>
   <div class="title">T-Ford Speedway<small id="menuSub">FREE PRACTICE</small></div>
   <div class="menu-bottom">
     <div class="swatches" id="menuSwatches" aria-label="Paint color"></div>
@@ -76,6 +78,11 @@
       <label for="aiLmp">AI LMP1 cars</label>
       <input type="range" id="aiLmp" min="0" max="10" step="1" value="3">
       <b id="aiLmpLabel">3</b>
+    </div>
+    <div class="ai-row" id="rowMiata" hidden>
+      <label for="aiMiata">AI Miata cars</label>
+      <input type="range" id="aiMiata" min="0" max="20" step="1" value="10">
+      <b id="aiMiataLabel">10</b>
     </div>
     <div class="ai-row" id="rowRanked" hidden>
       <label for="ranked">Ranked</label>
@@ -145,11 +152,15 @@
       <b>Model T Ford</b>
       <span>1915 runabout. Tops out around 100 km/h. Shift kicks the nearest car. Races on the classic speedway.</span>
     </button>
-    <button type="button" class="veh" role="radio" aria-checked="false" data-veh="gt3">
-      <b>GT3 race car</b>
-      <span>Much more grip and a top speed near 200 km/h. Shift flashes the headlights. No kick. Races at Spa-Francorchamps. A button at the top left of the start screen turns it into an LMP1 prototype.</span>
+    <button type="button" class="veh" role="radio" aria-checked="false" data-veh="miata">
+      <b>Spa race cars</b>
+      <span>Racing at Spa-Francorchamps in three classes: the Miata Cup <em class="veh-tag">Beginner friendly</em> (about 225 km/h, gentle grip), the GT3 (about 280 km/h) and the LMP1 prototype (unlocked with a fast GT3 lap). The buttons at the top left of the start screen switch between them.</span>
     </button>
-    <p class="set-note">Each vehicle has its own circuit, best lap and ghost.</p>
+    <button type="button" class="veh" role="radio" aria-checked="false" data-veh="dmiata">
+      <b>Drifting</b>
+      <span>Just for fun: slide the Miata or the GT3 around a twisty drift track or a huge empty parking lot. Set up to go sideways (less grip at the back, more steering). No lap times, no AI, no ratings or leaderboards. The buttons at the top left of the start screen switch car and place.</span>
+    </button>
+    <p class="set-note">Each vehicle has its own best lap and ghost.</p>
   </div>
   <div class="buttons"><button id="btnSetBack" type="button">Back (Esc)</button></div>
 </div>
@@ -184,6 +195,7 @@
   </div>
   <div id="lbTabs" class="lb-tabs" role="radiogroup" aria-label="Car class">
     <button type="button" role="radio" aria-checked="false">Model T</button>
+    <button type="button" role="radio" aria-checked="false">Miata</button>
     <button type="button" role="radio" aria-checked="true">GT3</button>
     <button type="button" role="radio" aria-checked="false">LMP1</button>
   </div>

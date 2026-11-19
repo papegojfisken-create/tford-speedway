@@ -45,7 +45,7 @@
     if (TF.onAccount) TF.onAccount();
   }
   // ---- driver rating (one per class) ----
-  var elo = null, ELO_NAMES = { tford: 'Model T', gt3: 'GT3', lmp1: 'LMP1' };
+  var elo = null, ELO_NAMES = { tford: 'Model T', miata: 'Miata', gt3: 'GT3', lmp1: 'LMP1' };
   // a title for every rating level: the ones under 800 are jokes, from 800 up you earn your way to Immortal
   var TITLES = [[0, 'Lawn Mower Pilot'], [300, 'Gravel Trap Tourist'], [450, 'Professional Spinner'], [600, 'Tyre Wall Inspector'], [700, 'Sunday Driver'],
     [800, 'Rookie'], [900, 'Club Racer'], [1000, 'Racer'], [1100, 'Contender'], [1200, 'Podium Hunter'], [1300, 'Pro'], [1400, 'Ace'],
@@ -55,7 +55,7 @@
   function drawElo() {
     var box = $('acElo'); if (!box) return;
     box.textContent = '';
-    ['tford', 'gt3', 'lmp1'].forEach(function (c) {
+    ['tford', 'miata', 'gt3', 'lmp1'].forEach(function (c) {
       var d = document.createElement('div'), a = document.createElement('span'), b = document.createElement('b'), t = document.createElement('em');
       a.textContent = ELO_NAMES[c]; b.textContent = elo ? String(Math.round(elo[c])) : '…'; t.textContent = elo ? titleFor(elo[c]) : '';
       d.appendChild(a); d.appendChild(b); d.appendChild(t); box.appendChild(d);
@@ -127,7 +127,7 @@
   }
 
   // ---- global leaderboards ----
-  var TABS = [['classic', 'tford', 'Model T', 'Classic speedway'], ['spa', 'gt3', 'GT3', 'Spa-Francorchamps'], ['spa', 'lmp1', 'LMP1', 'Spa-Francorchamps']];
+  var TABS = [['classic', 'tford', 'Model T', 'Classic speedway'], ['spa', 'miata', 'Miata', 'Spa-Francorchamps'], ['spa', 'gt3', 'GT3', 'Spa-Francorchamps'], ['spa', 'lmp1', 'LMP1', 'Spa-Francorchamps']];
   var lbOpen = false, lbTab = 1, lbSeq = 0, lbKind = 'lap';
   function fmtT(t) { var m = Math.floor(t / 60), s = t - m * 60; return m + ':' + (s < 10 ? '0' : '') + s.toFixed(2); }
   function sendLap(track, veh, t) {

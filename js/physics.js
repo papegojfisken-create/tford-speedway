@@ -80,6 +80,37 @@
     aiG: 29.6, aiVmax: 90, aiDecel: 28
   });
 
+  // The Miata Cup: a small 2-litre roadster for beginners. It is to the GT3 what the GT3 is to the LMP1: less pull, less grip,
+  // almost no downforce, about 225 km/h flat out. It is forgiving: the rear grips a little more than the front, the steering is
+  // gentle and the automatic counter-steer is strong, so a slide comes on slowly and is easy to catch.
+  VEHICLES.miata = Object.assign({}, VEHICLES.gt3, {
+    id: 'miata', name: 'Miata Cup', family: 'gt3', shiftText: 'pop-up headlights',
+    engine: 10.3, engineFade: 71, powExp: 2.2, topSpeed: 64, drag: 0.0005, downforce: 0.00003, shiftPower: 1,
+    brake: 20, gripFront: 9.8, gripRear: 10.8, stiffness: 70, stiffMu: 1,
+    steerSlow: 0.48, steerFast: 0.08, steerExp: 0.55, assist: 0.65,
+    draftPull: 0.45, draftRange: 2.0,
+    A: 1.16, B: 1.15, inertia: 1.15, wall: 6.3, halfTrack: 0.74, wheelR: 0.31, cOff: 1.2, cRad: 0.9,
+    rollK: 0.008, rollMax: 0.045, pitchK: 0.006, pitchMax: 0.03, vibe: 0.0012,
+    kick: false, flash: true, puffs: false, exhaust: [1.95, 0.25, 0.3], track: 'spa',
+    chase: { back: 6.4, up: 2.0, ahead: 3.0, look: 0.95 }, eye: [-0.45, 1.02, -0.3], eyePitch: -0.06,
+    menuCam: { r: 6.6, h: 1.2, look: [0, 0.55, 0] },
+    speedoMax: 240, pulses: 2,
+    rpm: function (gear, sp) { if (sp < 9) return 1500 + sp / 9 * 2500; var g = Math.min(5, Math.floor(sp / 10)); return 3200 + Math.min(1, sp / 10 - g) * 3800; },
+    aiG: 17.5, aiVmax: 70, aiDecel: 17 // with the learned Spa map a lone AI Miata laps in 2:17 (the AI GT3 1:57, the AI LMP1 1:37)
+  });
+
+  // Drifting: the Miata and the GT3 set up to slide. The rear grips clearly less than the front, the steering turns much further
+  // (so you can hold a big angle) and the automatic counter-steer is weak, so the car stays sideways when you want it to.
+  // They drive on the drift track or the parking lot ('track' is chosen in the game), with no laps, AI, ratings or leaderboards.
+  VEHICLES.dmiata = Object.assign({}, VEHICLES.miata, {
+    id: 'dmiata', name: 'Miata', family: 'drift', sound: 'miata', track: 'drift',
+    gripFront: 9.8, gripRear: 7.3, assist: 0.22, steerSlow: 0.65, steerFast: 0.32, steerExp: 0.4, engine: 11
+  });
+  VEHICLES.dgt3 = Object.assign({}, VEHICLES.gt3, {
+    id: 'dgt3', name: 'GT3', family: 'drift', sound: 'gt3', track: 'drift', shiftText: 'flash headlights',
+    gripFront: 10.5, gripRear: 7.9, downforce: 0.00005, assist: 0.22, steerSlow: 0.6, steerFast: 0.28, steerExp: 0.4
+  });
+
   function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
   function wrapPi(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
 

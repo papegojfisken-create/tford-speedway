@@ -4,8 +4,9 @@
   var COLORS = [['Black', 0x0e0e0f], ['Brewster green', 0x1f3d2b], ['Maroon', 0x6b1420], ['Royal blue', 0x16306b], ['Cream', 0xd8c9a0], ['Fire red', 0xb3201a]];
   // GT3 and LMP1 paint: same slots, named after racing marques
   var COLORS_RACE = [['Audi', 0x0e0e0f], ['Aston Martin', 0x0f6b4a], ['McLaren', 0xff6a00], ['BMW', 0x1c4fd1], ['Porsche', 0xf4f4f2], ['Ferrari', 0xd8141b]];
+  var COLORS_MIATA = [['Soul red', 0xa50f1e], ['Arctic white', 0xf2f2ee], ['Racing blue', 0x1d4fb8], ['Jet black', 0x101012], ['Zircon sand', 0xb9b2a0], ['Racing yellow', 0xf0c419]]; // Miata Cup paints
   function livery(hex) { return hex === TF.PORSCHE ? 1 : hex === TF.FERRARI ? 2 : hex === TF.AUDI ? 3 : hex === TF.BMW ? 4 : hex === TF.MCLAREN ? 5 : hex === TF.ASTON ? 6 : 0; } // paints that come with extra parts
-  function palette(v) { return v === 'tford' ? COLORS : COLORS_RACE; }
+  function palette(v) { return v === 'tford' ? COLORS : v === 'miata' || v === 'dmiata' ? COLORS_MIATA : COLORS_RACE; }
   var SAVE_KEY = 'tford-speedway-v2', RATE = 30, START_S = K.START; // v2: new track layout, old best laps do not apply
   function $(id) { return document.getElementById(id); }
   function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
@@ -16,8 +17,9 @@
   var VEH = TF.VEHICLES;
   // Best lap and ghost are kept per vehicle: save.best / save.ghost belong to the vehicle in use, the other one waits in save.store.
   // ai = Model T drivers on the speedway, aiGt3 and aiLmp = GT3 and LMP1 drivers at Spa.
-  var LMP_UNLOCK = 119; // seconds: a GT3 lap under 1:59 at Spa unlocks the LMP1
-  var save = { ranked: false, laps: 5, lmpOk: false, num: 7, color: 0, best: null, ghost: null, ai: 3, aiGt3: 8, aiLmp: 3, veh: 'tford', store: {} };
+  var LMP_UNLOCK = 115; // seconds: a GT3 lap under 1:55 at Spa unlocks the LMP1 (it was 1:59 before)
+  var lmpRevoked = false; // set when a saved game had the LMP1 without a GT3 lap that fast: it is taken back
+  var save = { ranked: false, driftTrack: 'drift', laps: 5, lmpOk: false, num: 7, color: 0, best: null, ghost: null, ai: 3, aiGt3: 8, aiLmp: 3, aiMiata: 10, veh: 'miata', store: {} }; // new players start in the beginner-friendly Miata Cup at Spa; a saved choice still wins
   // a saved lap only counts if it was driven on the circuit this vehicle uses now (laps saved before there were two circuits are 'classic')
   function okLap(l, v) { return l && typeof l.best === 'number' && l.ghost && Array.isArray(l.ghost.x) && l.ghost.x.length > 10 && Array.isArray(l.ghost.q) && (l.track || 'classic') === VEH[v].track; }
   try {
@@ -26,25 +28,32 @@
       if (raw.ai >= 0 && raw.ai <= 8) save.ai = raw.ai | 0;
       if (raw.aiGt3 >= 0 && raw.aiGt3 <= 20) save.aiGt3 = raw.aiGt3 | 0;
       if (raw.aiLmp >= 0 && raw.aiLmp <= 10) save.aiLmp = raw.aiLmp | 0;
+      save.aiMiata = raw.aiMiata >= 0 && raw.aiMiata <= 20 ? raw.aiMiata | 0 : 0; // (games saved before the Miata had no Miata AI)
       if (raw.color >= 0 && raw.color < COLORS.length) save.color = raw.color | 0;
       if (raw.num >= 0 && raw.num <= 99) save.num = raw.num | 0;
       if (raw.laps >= 1 && raw.laps <= 50) save.laps = raw.laps | 0;
       if (raw.rk === true) save.ranked = true;
+      if (raw.dt === 'drift' || raw.dt === 'lot') save.driftTrack = raw.dt; // drifting: the drift track or the parking lot
       if (raw.lmpU === true) save.lmpOk = true; // (an earlier build wrote 'lmpOk' too eagerly; that flag is ignored)
       if (typeof raw.veh === 'string' && VEH[raw.veh]) save.veh = raw.veh;
       if (!save.lmpOk && save.veh === 'lmp1') save.veh = 'gt3'; // the prototype has to be unlocked first
       if (raw.store && typeof raw.store === 'object') { for (var vk in VEH) if (okLap(raw.store[vk], vk)) save.store[vk] = raw.store[vk]; }
       else if (okLap(raw, 'tford')) save.store.tford = { best: raw.best, ghost: raw.ghost, track: 'classic' }; // saved before there were two vehicles
+      // the unlock time became stricter: anyone whose saved GT3 best is not under it loses the LMP1 again (this also runs for an
+      // account's saved game, which is loaded the same way after logging in)
+      if (save.lmpOk && !(save.store.gt3 && save.store.gt3.best < LMP_UNLOCK)) { save.lmpOk = false; lmpRevoked = true; if (save.veh === 'lmp1') save.veh = 'gt3'; }
       var cur = save.store[save.veh]; if (cur) { save.best = cur.best; save.ghost = cur.ghost; }    }
   } catch (e) { /* no saved data */ }
   function lapEntry(v) { return save.best != null && save.ghost ? { best: save.best, ghost: save.ghost, track: VEH[v].track } : undefined; }
   function persist() {
     save.store[save.veh] = lapEntry(save.veh);
-    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ rk: save.ranked, laps: save.laps, lmpU: save.lmpOk, num: save.num, color: save.color, ai: save.ai, aiGt3: save.aiGt3, aiLmp: save.aiLmp, veh: save.veh, store: save.store })); } catch (e) { /* storage unavailable */ }
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify({ rk: save.ranked, dt: save.driftTrack, laps: save.laps, lmpU: save.lmpOk, num: save.num, color: save.color, ai: save.ai, aiGt3: save.aiGt3, aiLmp: save.aiLmp, aiMiata: save.aiMiata, veh: save.veh, store: save.store })); } catch (e) { /* storage unavailable */ }
     if (TF.account) TF.account.queue(); // when logged in, the saved game is copied to the account a few seconds later
   }
 
-  TF.setTrack(VEH[save.veh].track); LAP = K.LAP; START_S = K.START; // the circuit that goes with the vehicle in use
+  // the circuit that goes with a vehicle (drifting: whichever drift place was picked last)
+  function trackFor(v) { return VEH[v].family === 'drift' ? save.driftTrack : VEH[v].track; }
+  TF.setTrack(trackFor(save.veh)); LAP = K.LAP; START_S = K.START;
 
   // ---------- renderer and scene ----------
   var renderer;
@@ -62,39 +71,94 @@
   var car = TF.buildVehicle(myVeh, palette(myVeh)[save.color][1], false, save.num), body = car.userData.body; scene.add(car);
   var ghostCar = TF.buildVehicle(myVeh, 0, true); ghostCar.visible = false; scene.add(ghostCar);
   var phys = new TF.Physics(world.colliders), fx = new TF.Effects(scene), sound = new TF.Sound();
-  phys.setVehicle(myVeh); sound.setProfile(myVeh);
+  phys.setVehicle(myVeh); sound.setProfile(VEH[myVeh].sound || myVeh);
   var me = { mesh: car, body: body, phys: phys, spin: 0, flT: -1 };
   // the GT3's headlight flash also lights up the road ahead (a spotlight that is off unless flashing)
   var flashLight = new T.SpotLight(0xfff0d0, 0, 90, 0.5, 0.5, 1); scene.add(flashLight); scene.add(flashLight.target);
   // speed the AI may carry at every point of the lap, for each kind of vehicle. On the big circuit they follow the racing line.
   var profiles = {};
+  // The AI drives exactly the car you drive. What makes the AI GT3s quick at Spa is how they drive it:
+  //  - a speed map learned lap by lap (one number per 10 m of the lap, 0.95 to 1.17): it lets them carry more speed wherever
+  //    they stay on the road and makes them brake a little earlier where they used to run wide;
+  //  - braking planned at 24 m/s2 instead of 22, and sharper steering (see aiTraits).
+  // Alone, an AI GT3 laps Spa in 1:57.4 this way (2:02.4 before).
+  var AI_PLAN = { gt3: { aiDecel: 24 } };
+  var SPA_GT3_MAP = '7e7e7e7e7e7e7e7e7e7e7e7e7e706m6m6m6m6m6m6m6m6m6m4r30303030303030303030303030306m6m6m6m6m6m7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e6m6m6m6m6m6m6m6m6m6m6m30303030303030303030303030305z6m6m6m6m6m797e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e6v6v6v6r6m6m6m6m6m6m6m4646463l303030303030303030305d5d5d5d5d5z7474747474797e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e746r6r6r6r6r6r6r6r6r6r5h3p3h3h3h3h3h3h3h3h3h3h3h2c2c2w2w3h3h3h3h3l3l3p3p3p3p3p4a5h5z6m6m6m6r7074797979796m6m6m6m6m6m6m6m6m6m6m6m6m6m6m7979797979797e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e79707070707070707070706d5454545454545454545454545454547070707070707e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e796060606060605r5r5r5r551x1x1x1x1x1x1i1i1i1i1i1i1i1i1p2s3d3d3d3d6i6r6v6v6v6v7e7e7e7e7e7e7e7e7e7e7e7e7e7e';
+  var SPA_LMP1_MAP = '9z9z9z9z9z9z9z9z9z9z9a9a9a9a9a9a9a9a9a9a9a9a9a4x4x4x4x4x4x4x4x4x4x4x4x4x4x4x4x9a9a9a9a9a9a9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9u9u9u9u9u9u9u9u9u9u9u9u9u8t8t8t8t8t8t8t8t8t8t8t8t8t8t8t8t9u9u9u9u9u9u9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9l9l9l9l9g99999999999999996r6r6r6r644w4w4w4w4w4w4w4w4w4w4w7979797979798y9n9n9n9n9n9u9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z979797979797979797979797974848484848484848484848484848484848487u8i979797979s9v9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9e95959595959595959595958x4o3h3h3h3h3h3h3h3h3h3h3h2d0y0y0y0y0y1010101010101919191911114j55556e8c8c8z93939c9p7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u9p9p9p9p9p9p9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9z9j9j9j9j9j988q8q8q8q8q8q8q5s5s5s5s5s3z17171717171717171717172a2a2a2a2a6q8x8x8x8x8x9o9z9z9z9z9z9z9z9z9z9z9z9z9z'; // the same for the LMP1s (0.93 to 1.26): alone, flat out, an AI LMP1 laps in 1:36.6 (1:43.5 before)
+  var SPA_MIATA_MAP = '9g9g9g9g9g9g9g9g9g9g9g9g9g8s8s8s8s8s8s8s8s8s8s8s5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j8s8s8s8s8s8s9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g8x8x8x8x8x8x8x8x8x8x8x6a6a6a6a6a6a6a6a6a6a6a6a6a6a888x8x8x8x8x9b9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9b8s8s8s8s8d8d8d8d8d8d7p565656563e3e3e3e3e3e3e3e3e3e6f6f6f6f6f8d8s8s8s8s8s7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u7u8i97979797979b9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g8s8s8s8s8s8s8s8s8s8s8s5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j5j8s8s8s8s8s8s9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9b8i8i8d8d8d8d8d8d8d8d7p3z3r323232323232323232321y1f1f1y3n3n3n3n3n3r43434343435a6j617z7z7z898i8i8x8x8x8x6a6a6a6a6a6a6a6a6a6a6a6a6a6a6x8x8x8x8x8x929g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g8x8x8x8x8x8x8x8x8x8x8x6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a8x8x8x8x8x8x9g9g9g9g9g9g9g9g9g9g9g9g9g9g9g978x8x8x8x8x8s8d8d8d8d725s5s5s5s5s563e3e3e3e3e3e3e3e3e3e4k4k4k4k4k8d8n8n8n8n8n9g9g9g9g9g9g9g9g9g9g9g9g9g'; // the same for the Miatas (0.95 to 1.24): alone, flat out, an AI Miata laps in 2:17.2
+  var SPA_MAPS = { gt3: SPA_GT3_MAP, lmp1: SPA_LMP1_MAP, miata: SPA_MIATA_MAP }, spaMaps = {};
+  function spaMap(v) {
+    if (spaMaps[v]) return spaMaps[v];
+    var str = SPA_MAPS[v], n = str.length / 2, mp = spaMaps[v] = new Float32Array(n);
+    for (var i = 0; i < n; i++) mp[i] = 0.9 + parseInt(str.substr(i * 2, 2), 36) / 1000;
+    return mp;
+  }
   function profileFor(v) {
-    var c = VEH[v], key = K.id + ':' + v;
-    return profiles[key] || (profiles[key] = K.kind === 'circuit' ? K.makeLineProfile(c.aiG, c.downforce, c.aiVmax, c.aiDecel) : K.makeProfile(c.aiG, c.downforce, c.aiVmax, c.aiDecel));
+    var c = Object.assign({}, VEH[v], AI_PLAN[v] || {}), key = K.id + ':' + v;
+    if (profiles[key]) return profiles[key];
+    var base = K.kind === 'circuit' ? K.makeLineProfile(c.aiG, c.downforce, c.aiVmax, c.aiDecel) : K.makeProfile(c.aiG, c.downforce, c.aiVmax, c.aiDecel);
+    if (SPA_MAPS[v] && K.id === 'spa') { // the learned speed map for this class at Spa
+      var mp = spaMap(v), nb = mp.length, lap = K.LAP;
+      return (profiles[key] = function (sv) { return base(sv) * mp[Math.floor((((sv % lap) + lap) % lap) / 10) % nb]; });
+    }
+    return (profiles[key] = base);
   }
 
   // ---------- AI drivers ----------
   // AI cars come in three kinds. On the classic speedway they are Model Ts. At Spa they are GT3s and LMP1s, each with its own slider.
   // The car specs are the same as the player's. What differs is how hard the driver pushes ("pace": the share of the speed each corner allows).
-  var AI_ORDER = ['lmp1', 'gt3', 'tford'], AI_MAX = { tford: 8, gt3: 20, lmp1: 10 };
+  var AI_ORDER = ['lmp1', 'gt3', 'miata', 'tford'], AI_MAX = { tford: 8, gt3: 20, lmp1: 10, miata: 20 };
   // base pace per kind, chosen so a lone GT3 laps Spa in about 2:02 and a lone LMP1 in about 1:45 (traffic adds a little)
-  var AI_PACE = { tford: 0.97, gt3: 1.0, lmp1: 1.01 }, AI_SPREAD = { tford: 0.01, gt3: 0.012, lmp1: 0.025 };
+  var AI_PACE = { tford: 0.97, gt3: 1.0, lmp1: 1.01, miata: 1.0 }, AI_SPREAD = { tford: 0.01, gt3: 0.012, lmp1: 0.025, miata: 0.03 };
   var AI_NUMS = [3, 12, 5, 21, 9, 14, 2, 18];
   // the k-th car of a kind gets its own habits: where it likes to run, how hard it pushes, its race number
   function aiTraits(veh, k) {
     var f = (k * 0.6180339887) % 1, g = (k * 0.7548776662 + 0.3) % 1;
-    return { lane: (f - 0.5) * 2.4, pace: AI_PACE[veh] * (1 + (g - 0.5) * AI_SPREAD[veh]), power: 1, num: veh === 'lmp1' ? 1 + k : veh === 'gt3' ? 11 + k : AI_NUMS[k % AI_NUMS.length] };
+    return { lane: (f - 0.5) * 2.4, pace: AI_PACE[veh] * (1 + (g - 0.5) * AI_SPREAD[veh]), power: 1, steerK: veh === 'gt3' ? 7 : veh === 'lmp1' ? 5 : veh === 'miata' ? 7 : 3, lookK: veh === 'lmp1' ? 0.5 : veh === 'miata' ? 0.7 : 0.6, num: veh === 'miata' ? 51 + k : veh === 'lmp1' ? 1 + k : veh === 'gt3' ? 11 + k : AI_NUMS[k % AI_NUMS.length] };
   }
   var ais = [], mapSvg = $('mapGhost').parentNode, mapSc = 1; // mapSc: how many map units one screen unit is, so dots keep their size on any circuit
-  function ownTrack() { return K.id === VEH[myVeh].track; } // laps and ghosts only mean something on the circuit of the vehicle that drove them
+  function ownTrack() { return K.id === trackFor(myVeh); } // laps and ghosts only mean something on the circuit of the vehicle that drove them
   // the cars start in rows of two, the fastest kind in front, ahead of the player
   // within a class, the car that starts at the front is 0.5 s per lap slower than the one at the back (others in between, evenly),
   // so the cars behind close up and there is something to overtake
-  var LAP_NOM = { lmp1: 103, gt3: 123, tford: 35 };
+  var LAP_NOM = { lmp1: 103, gt3: 123, tford: 35, miata: 145 };
+  // Pace groups at Spa: the AI GT3s and LMP1s each run in groups of 1 to 5 cars. Every car in a group aims for the same lap time;
+  // the fastest group aims for FAST, the slowest for SLOW, and the groups in between are spread evenly. The fastest group starts
+  // at the front of its class. Group sizes come from a fixed pattern, so every computer in an online race gets the same groups.
+  var GROUP_SIZES = [3, 2, 4, 2, 5, 2, 3, 1, 4, 5, 2, 3];
+  // table: lap time for each pace, measured with one AI car alone on Spa (pace 1 is flat out). traffic: what racing in a full field
+  // costs on top of that: tf for the fastest group, ts for the slowest (LMP1s lose much more, they are always lapping GT3s).
+  var PACE_GROUPS = {
+    gt3: { fast: 117, slow: 120, tf: 0.3, ts: 0.6, table: [[1, 117.4], [0.98, 117.55], [0.96, 117.77], [0.94, 118.62], [0.92, 119.5], [0.9, 120.6], [0.88, 121.7], [0.86, 122.88]] }, // flat out 1:57.4
+    // Miata Cup: 2:18 to 2:24, for rookies and for experienced drivers: a few small, quick groups at the front to chase, and
+    // bigger, slower groups at the back so a beginner always has cars around to race (20 cars make groups of 2, 3, 3, 4, 4 and 4)
+    miata: { fast: 138, slow: 144, tf: 1.2, ts: 0.4, sizes: [2, 3, 3, 4, 4, 4], table: [[1, 137.22], [0.98, 137.65], [0.96, 138.28], [0.94, 139.0], [0.92, 139.87], [0.9, 140.87], [0.88, 141.98], [0.86, 143.25], [0.84, 144.57], [0.82, 145.98]] }, // flat out 2:17.2
+    // LMP1: a tight field, 1:38 to 1:40, with two backmarkers (10 cars make groups of 3, 2, 3 and 2)
+    lmp1: { fast: 98, slow: 100, tf: 1.15, ts: 1.05, maxPace: 0.975, sizes: [3, 2, 3, 2], table: [[1, 96.55], [0.98, 96.6], [0.96, 97.07], [0.94, 97.12], [0.92, 97.63], [0.9, 98.13], [0.88, 98.68], [0.86, 99.15], [0.84, 99.75], [0.82, 100.45]] } // flat out 1:36.6
+  };
+  function paceGroups(n, pat) {
+    var sizes = [], left = n, gi = 0; pat = pat || GROUP_SIZES;
+    while (left > 0) { var sz = Math.min(left, pat[gi % pat.length]); sizes.push(sz); left -= sz; gi++; }
+    return sizes;
+  }
+  function groupPace(cfg, target) {
+    var tl = target - (cfg.tf + (cfg.ts - cfg.tf) * (target - cfg.fast) / (cfg.slow - cfg.fast)), T = cfg.table; // the lone-car lap time to aim for
+    if (tl <= T[0][1]) return 1;
+    for (var i = 1; i < T.length; i++) if (tl <= T[i][1]) return T[i - 1][0] + (T[i][0] - T[i - 1][0]) * (tl - T[i - 1][1]) / (T[i][1] - T[i - 1][1]);
+    return T[T.length - 1][0];
+  }
   function gridHandicap() {
     ais.forEach(function (a) { a.spec.pace = a.basePace; });
     AI_ORDER.forEach(function (v) {
-      var cls = ais.filter(function (a) { return a.veh === v; }); // sorted front of the grid first
+      var cls = ais.filter(function (a) { return a.veh === v; }), cfg = PACE_GROUPS[v]; // sorted front of the grid first
+      if (cfg && K.id === 'spa' && cls.length) {
+        var sizes = paceGroups(cls.length, cfg.sizes), G = sizes.length, idx = 0;
+        sizes.forEach(function (sz, j) {
+          var target = G > 1 ? cfg.fast + (cfg.slow - cfg.fast) * j / (G - 1) : cfg.fast;
+          for (var m = 0; m < sz; m++, idx++) { var a = cls[idx]; a.grp = j + 1; a.grpTarget = target; a.spec.pace = Math.min(groupPace(cfg, target + (m - (sz - 1) / 2) * 0.06), 1 - 0.01 * j, cfg.maxPace || 1); } // a few hundredths apart inside a group
+        });
+        return;
+      }
       cls.forEach(function (a, r) { a.spec.pace = a.basePace * (1 - (0.5 / LAP_NOM[v]) * (cls.length > 1 ? 1 - r / (cls.length - 1) : 0)); });
     });
   }
@@ -117,17 +181,17 @@
   }
   function makeAi(veh, k) {
     var sp = aiTraits(veh, k), colIdx = (k + 1 + (veh === 'lmp1' ? 2 : 0)) % COLORS.length, mesh = TF.buildVehicle(veh, palette(veh)[colIdx][1], false, sp.num, true);
-    var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); dot.setAttribute('r', String(8 * mapSc)); dot.setAttribute('fill', veh === 'lmp1' ? '#f2b705' : '#fff8ea'); dot.setAttribute('opacity', '.85');
+    var dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle'); dot.setAttribute('r', String(8 * mapSc)); dot.setAttribute('fill', veh === 'lmp1' ? '#f2b705' : veh === 'miata' ? '#ff6f61' : '#fff8ea'); dot.setAttribute('opacity', '.85');
     mapSvg.insertBefore(dot, $('mapGhost'));
     var a = { veh: veh, k: k, basePace: sp.pace, col: colIdx, num: sp.num, mesh: mesh, body: mesh.userData.body, phys: new TF.Physics(world.colliders), spin: 0, spec: sp, lane: sp.lane, stuck: 0, dot: dot, flT: -1, prof: profileFor(veh), inp: { thr: false, brk: false, hand: false, steer: 0, boost: false } };
     a.phys.power = sp.power; a.phys.setVehicle(veh); scene.add(mesh); return a;
   }
   // how many AI cars the sliders ask for on the current circuit
-  function wantedCounts() { if (pubCfg()) return { tford: 0, gt3: AI_MAX.gt3, lmp1: AI_MAX.lmp1 }; return K.kind === 'oval' ? { tford: save.ai, gt3: 0, lmp1: 0 } : { tford: 0, gt3: save.aiGt3, lmp1: save.aiLmp }; }
-  function aiCounts() { var c = [0, 0, 0]; ais.forEach(function (a) { c[AI_ORDER.indexOf(a.veh)]++; }); return c; }
+  function wantedCounts() { if (K.drift) return { tford: 0, gt3: 0, lmp1: 0, miata: 0 }; if (pubCfg()) return { tford: 0, gt3: AI_MAX.gt3, lmp1: AI_MAX.lmp1, miata: 0 }; return K.kind === 'oval' ? { tford: save.ai, gt3: 0, lmp1: 0, miata: 0 } : { tford: 0, gt3: save.aiGt3, lmp1: save.aiLmp, miata: save.aiMiata }; }
+  function aiCounts() { var c = AI_ORDER.map(function () { return 0; }); ais.forEach(function (a) { c[AI_ORDER.indexOf(a.veh)]++; }); return c; }
   // add or remove AI cars until the field matches the counts; the cars stay sorted fastest kind first
   function applyAiCounts(want) {
-    var have = { tford: 0, gt3: 0, lmp1: 0 }, changed = false, v, i;
+    var have = { tford: 0, gt3: 0, lmp1: 0, miata: 0 }, changed = false, v, i;
     ais.forEach(function (a) { have[a.veh]++; });
     AI_ORDER.forEach(function (v) {
       while (have[v] > want[v]) {
@@ -142,7 +206,7 @@
   // the sliders: Model T drivers on the speedway, GT3 and LMP1 drivers at Spa
   function syncAiUi() {
     var circuit = K.kind !== 'oval', pb = !!pubCfg(); // on a public server the field is fixed at the maximum
-    [['aiCount', 'aiLabel', save.ai], ['aiGt3', 'aiGt3Label', pb ? AI_MAX.gt3 : save.aiGt3], ['aiLmp', 'aiLmpLabel', pb ? AI_MAX.lmp1 : save.aiLmp]].forEach(function (s) {
+    [['aiCount', 'aiLabel', save.ai], ['aiGt3', 'aiGt3Label', pb ? AI_MAX.gt3 : save.aiGt3], ['aiLmp', 'aiLmpLabel', pb ? AI_MAX.lmp1 : save.aiLmp], ['aiMiata', 'aiMiataLabel', pb ? 0 : save.aiMiata]].forEach(function (s) {
       if ($(s[0]).disabled !== pb) $(s[0]).disabled = pb;
       if ($(s[0]).value !== String(s[2])) $(s[0]).value = s[2];
       if ($(s[1]).textContent !== String(s[2])) $(s[1]).textContent = s[2];
@@ -150,6 +214,9 @@
     if ($('rowFord').hidden === !circuit) $('rowFord').hidden = circuit;
     if ($('rowGt3').hidden === circuit) $('rowGt3').hidden = !circuit;
     if ($('rowLmp').hidden === circuit) $('rowLmp').hidden = !circuit;
+    if ($('rowMiata').hidden === circuit) $('rowMiata').hidden = !circuit;
+    if (K.drift) ['rowFord', 'rowGt3', 'rowLmp', 'rowMiata'].forEach(function (id) { $(id).hidden = true; }); // drifting: no AI
+    $('rowLaps').hidden = !!K.drift;
   }
   // the main slider on the current circuit (what the arrow keys change)
   function mainAi() { return K.kind === 'oval' ? save.ai : save.aiGt3; }
@@ -180,7 +247,7 @@
   buildGhostLine();
 
   function driveAi(a, dt) {
-    var circuit = K.kind !== 'oval', p = a.phys, loc = p.loc, u = p.u, sp = a.spec, look = 6 + Math.abs(u) * 0.6, thr = true, brk = false, near = circuit ? 32 : 16, gl = circuit ? null : ghostLine, chase = false;
+    var circuit = K.kind !== 'oval', p = a.phys, loc = p.loc, u = p.u, sp = a.spec, look = (sp.look0 || 6) + Math.abs(u) * (sp.lookK || 0.6), thr = true, brk = false, near = circuit ? 32 : 16, gl = circuit ? null : ghostLine, chase = false;
     // on the big circuit everyone drives the racing line; on the speedway they copy your best lap. Either way a small personal
     // offset keeps the cars from all sitting on the same strip of road.
     var target = circuit ? clamp(K.lineOffset(loc.s + look) + sp.lane * 0.35, -4.6, 4.6) : gl ? clamp(gl.d[ghostBin(loc.s + look)] + sp.lane * 0.5, -4.2, 4.2) : sp.lane, free = true;
@@ -220,13 +287,14 @@
     var err = wrapPi(Math.atan2(-(tg.z - p.z), tg.x - p.x) - p.psi);
     // speed: yours at this point of the lap (looking a few metres ahead so braking starts in time);
     // without a ghost, the track's own suggested corner speed
-    var want = a.prof(loc.s + 2) * sp.pace * (chase && circuit ? 1.02 : 1); // pushes a little harder when a car is right ahead
+    var want = a.prof(loc.s + 2) * sp.pace * (chase && circuit && a.veh === 'tford' ? 1.02 : 1); // pushes a little harder when a car is right ahead (not the GT3s: they already drive at the limit)
     // never above what the corner can physically take, so the AI does not copy the moments you ran wide
     if (gl) want = Math.min(a.prof(loc.s + 2) * (gl.w[ghostBin(loc.s + 2)] ? 0.97 : 1.04), Math.max(want * 0.88, Math.min(gl.v[ghostBin(loc.s + 2)], gl.v[ghostBin(loc.s + 7)]) * (sp.pace + 0.02)));
+    if (circuit && a.veh !== 'tford') { var offLine = Math.abs(a.lane - K.lineOffset(loc.s + look)); want *= 1 - clamp((offLine - 0.6) * (sp.offK || 0.025), 0, 0.08); } // off the racing line (overtaking, defending) the corners cannot be taken at the limit
     if (p.surface !== 'road') want = Math.min(want, 9);
     if (u > want) thr = false;
-    if (u > want + 1.2) brk = true;
-    a.inp.thr = thr; a.inp.brk = brk; a.inp.steer = clamp(err * 3, -1, 1);
+    if (u > want + (sp.brkM || 1.2)) brk = true;
+    a.inp.thr = thr; a.inp.brk = brk; a.inp.steer = clamp(err * (sp.steerK || 3), -1, 1);
     a.inp.boost = !!VEH[a.veh].boost && thr && !brk && p.boostE > 0.15 && Math.abs(err) < 0.05; // AI prototypes boost on the straights
     // now and then an AI driver alongside you kicks back
     a.kickCd = Math.max(0, (a.kickCd || 0) - dt);
@@ -237,7 +305,7 @@
     // spun or stuck for a while: put the car back on its lane
     var facing = Math.cos(p.psi) * p.loc.tx - Math.sin(p.psi) * p.loc.tz;
     a.stuck = (Math.abs(p.u) < 1 || facing < 0) ? a.stuck + dt : 0;
-    if (a.stuck > 4) { p.place(p.loc.s, clamp(p.loc.d, -4, 4)); a.lane = p.loc.d; a.stuck = 0; }
+    if (a.stuck > 4) { p.place(p.loc.s, clamp(p.loc.d, -4, 4)); a.lane = p.loc.d; a.stuck = 0; a.resets = (a.resets || 0) + 1; }
   }
   // kick: shove the other car sideways, away from the kicker, and leave it weaving for a moment
   var wasBump = false;
@@ -281,6 +349,7 @@
   function onShift() {
     var cf = VEH[myVeh];
     if (cf.boost) { if (phys.boostE < 0.02) toast('Boost empty: brake to charge it'); } // boost is a hold: simulate() reads the key
+    else if (car.userData.setPopups) { var upNow = !car.userData.popupsUp(); car.userData.setPopups(upNow); toast(upNow ? 'Headlights up' : 'Headlights down'); } // the Miata's pop-up headlights
     else if (cf.flash) flashHeadlights(); else playerKick();
   }
 
@@ -333,6 +402,7 @@
         var pn = +ps.n; if (pn >= 0 && pn <= 99 && (pn | 0) !== o.num) { o.num = pn | 0; swapRemoteModel(o, pv); }
         else if (pv !== o.veh) swapRemoteModel(o, pv);
         if (typeof ps.fl === 'number') { if (o.fn !== null && ps.fl !== o.fn) o.flT = 0; o.fn = ps.fl; } // their headlight-flash counter went up
+        if (o.mesh.userData.setPopups && o.mesh.userData.popupsUp() !== !!ps.hl) o.mesh.userData.setPopups(!!ps.hl); // their pop-up headlights
         o.tgt = { x: +c[0] || 0, z: +c[1] || 0, psi: +c[2] || 0, u: +c[3] || 0, v: +c[4] || 0, r: +c[5] || 0, delta: +c[6] || 0, at: performance.now() };
         o.phys.air = +c[7] || 0; o.phys.airSide = c[8] < 0 ? -1 : 1; o.phys.wobble = +c[9] || 0;
         if ((ps.col | 0) !== o.col && COLORS[ps.col | 0]) {
@@ -372,7 +442,7 @@
         netMove(a, dt);
       }
     } else {
-      if (K.id !== VEH[myVeh].track) setTrack(VEH[myVeh].track); // my own circuit again
+      if (K.id !== trackFor(myVeh)) setTrack(trackFor(myVeh)); // my own circuit again
       applyAiCounts(wantedCounts()); // I drive the AI, so the field is the one my sliders ask for
       for (i = 0; i < ais.length; i++) ais[i].phys.remote = false;
     }
@@ -383,7 +453,7 @@
       var moving = state === 'drive', msg = {
         c: [r2(phys.x), r2(phys.z), r3(phys.psi), moving ? r2(phys.u) : 0, moving ? r2(phys.v) : 0, moving ? r3(phys.r) : 0, r3(phys.delta), r2(Math.max(0, phys.air)), phys.airSide, r2(phys.wobble)],
         col: save.color, n: save.num, veh: myVeh, trk: K.id, bo: phys.boosting ? 1 : 0, st: state === 'menu' ? 0 : moving ? 1 : 2, t: joinedAt, rd: gridHold && !readyMe ? 0 : 1, rc: raceLive && !gridHold && !finished && state !== 'menu' ? 1 : 0,
-        rk: rankedOn() ? 1 : 0, un: TF.account && TF.account.user ? TF.account.user() : null, k: [kickSeq, kickTo], fl: flashSeq, ai: null, ac: aiCounts()
+        rk: rankedOn() ? 1 : 0, un: TF.account && TF.account.user ? TF.account.user() : null, k: [kickSeq, kickTo], fl: flashSeq, hl: car.userData.popupsUp && car.userData.popupsUp() ? 1 : 0, ai: null, ac: aiCounts()
       };
       if (isHost && state !== 'menu') { msg.ai = []; for (i = 0; i < ais.length; i++) { var q2 = ais[i].phys; msg.ai.push(r2(q2.x), r2(q2.z), r3(q2.psi), r2(q2.u), r3(q2.delta)); } }
       net.send(msg);
@@ -457,7 +527,7 @@
   resetRun();
 
   // ---------- HUD ----------
-  var hud = $('hud'), hLap = $('hLap'), hTime = $('hTime'), hBest = $('hBest'), hGap = $('hGap'), hFlag = $('hFlag'), hCam = $('hCam'), mapCar = $('mapCar'), mapGhost = $('mapGhost'), toastEl = $('toast'), toastT = 0;
+  var hud = $('hud'), hDriftAng = $('hDriftAng'), hLap = $('hLap'), hTime = $('hTime'), hBest = $('hBest'), hGap = $('hGap'), hFlag = $('hFlag'), hCam = $('hCam'), mapCar = $('mapCar'), mapGhost = $('mapGhost'), toastEl = $('toast'), toastT = 0;
   // the dial sweeps 240 degrees from 0 to its maximum: 120 km/h for the Model T, 240 km/h for the GT3
   var needle, hSpeed, speedoMax = 120;
   function buildSpeedo(max) {
@@ -522,7 +592,7 @@
     lbT -= dt; if (lbT > 0) return; lbT = 0.25;
     r.sort(function (a, b) { return (b.ph.pg || 0) - (a.ph.pg || 0); });
     var cls = r.filter(function (c) { return c.veh === myVeh; });
-    var title = myVeh === 'lmp1' ? 'LMP1 CLASS' : myVeh === 'gt3' ? 'GT3 CLASS' : 'RACE';
+    var title = myVeh === 'lmp1' ? 'LMP1 CLASS' : myVeh === 'gt3' ? 'GT3 CLASS' : myVeh === 'miata' ? 'MIATA CLASS' : 'RACE';
     var a = boardHtml(title, cls), b = cls.length === r.length ? '' : boardHtml('OVERALL', r);
     if (lbClass.innerHTML !== a) lbClass.innerHTML = a;
     if (lbAll.innerHTML !== b) lbAll.innerHTML = b;
@@ -560,6 +630,10 @@
     mapCar.setAttribute('cx', phys.x.toFixed(1)); mapCar.setAttribute('cy', phys.z.toFixed(1));
     for (var i = 0; i < ais.length; i++) { ais[i].dot.setAttribute('cx', ais[i].phys.x.toFixed(1)); ais[i].dot.setAttribute('cy', ais[i].phys.z.toFixed(1)); }
     hDraft.style.opacity = phys.draft > 0.08 ? Math.min(1, phys.draft * 1.3).toFixed(2) : '0';
+    if (VEH[myVeh].family === 'drift') { // drifting: how sideways the car is (the angle between where it points and where it goes)
+      var ang = Math.abs(phys.u) > 5 ? Math.atan2(Math.abs(phys.v), Math.abs(phys.u)) * 180 / Math.PI : 0, dtx = ang > 8 ? 'DRIFT ' + Math.round(ang) + '°' : '';
+      if (hDriftAng.textContent !== dtx) { hDriftAng.textContent = dtx; hDriftAng.classList.toggle('big', ang > 35); }
+    }
     if (ghostCar.visible) { mapGhost.setAttribute('cx', ghostCar.position.x.toFixed(1)); mapGhost.setAttribute('cy', ghostCar.position.z.toFixed(1)); mapGhost.setAttribute('visibility', 'visible'); }
     else mapGhost.setAttribute('visibility', 'hidden');
   }
@@ -617,13 +691,26 @@
   var settingsOpen = false;
   function updateVehicleUi() {
     var cf = VEH[myVeh];
-    $('menuSub').textContent = 'FREE PRACTICE · ' + cf.name.toUpperCase() + ' · ' + K.name.toUpperCase();
+    $('menuSub').textContent = (cf.family === 'drift' ? 'DRIFTING · ' : 'FREE PRACTICE · ') + cf.name.toUpperCase() + ' · ' + K.name.toUpperCase();
+    hud.classList.toggle('drift', cf.family === 'drift'); // drifting: no lap times, race counter or leaderboards on screen
+    if (cf.family === 'drift') { // the two buttons at the top left: the other drift car, and the other drift place
+      var oc = myVeh === 'dmiata' ? 'dgt3' : 'dmiata', op = save.driftTrack === 'lot' ? 'drift' : 'lot';
+      $('btnLmp').hidden = false; $('btnLmp').disabled = false; $('btnLmp').classList.remove('locked'); $('btnLmp').dataset.target = oc;
+      $('btnLmp').textContent = oc === 'dgt3' ? 'Switch to GT3' : 'Switch to Miata';
+      $('btnSpa2').hidden = false; $('btnSpa2').disabled = false; $('btnSpa2').classList.remove('locked'); $('btnSpa2').dataset.target = 'place:' + op;
+      $('btnSpa2').textContent = op === 'lot' ? 'Go to the parking lot' : 'Go to the drift track';
+      return;
+    }
     document.querySelectorAll('.veh').forEach(function (b) { b.setAttribute('aria-checked', VEH[b.dataset.veh].family === cf.family ? 'true' : 'false'); }); // the GT3 tile also covers the LMP1
     document.querySelectorAll('.shift-desc').forEach(function (el) { el.textContent = cf.shiftText; });
-    // the little button at the top left: only for the GT3 family, switches between GT3 and LMP1
-    var lb = $('btnLmp'); lb.hidden = cf.family !== 'gt3';
-    lb.textContent = myVeh === 'lmp1' ? 'Switch to GT3' : save.lmpOk ? 'Switch to LMP1' : 'LMP1 locked · drive a GT3 lap under ' + fmt(LMP_UNLOCK);
-    lb.disabled = myVeh !== 'lmp1' && !save.lmpOk; lb.classList.toggle('locked', lb.disabled);
+    // the two buttons at the top left (Spa only): they always offer the two other Spa cars, in the order LMP1, GT3, Miata Cup
+    var others = ['lmp1', 'gt3', 'miata'].filter(function (v) { return v !== myVeh; }), SW_TEXT = { lmp1: 'Switch to LMP1', gt3: 'Switch to GT3', miata: 'Switch to Miata Cup · beginner friendly' };
+    ['btnLmp', 'btnSpa2'].forEach(function (id, i) {
+      var b = $(id), v = others[i], locked = v === 'lmp1' && !save.lmpOk;
+      b.hidden = cf.family !== 'gt3'; b.dataset.target = v;
+      b.textContent = locked ? 'LMP1 locked · drive a GT3 lap under ' + fmt(LMP_UNLOCK) : SW_TEXT[v];
+      b.disabled = locked; b.classList.toggle('locked', locked);
+    });
   }
   function setVehicle(id) {
     if (!VEH[id] || id === myVeh || (id === 'lmp1' && !save.lmpOk)) return;
@@ -637,8 +724,8 @@
     car = TF.buildVehicle(id, palette(id)[save.color][1], false, save.num); body = car.userData.body; scene.add(car);
     ghostCar = TF.buildVehicle(id, 0, true); ghostCar.visible = false; scene.add(ghostCar);
     me.mesh = car; me.body = body; me.flT = -1; me.spin = 0; flashLight.intensity = 0;
-    phys.setVehicle(id); sound.setProfile(id); buildSpeedo(VEH[id].speedoMax);
-    setTrack(VEH[id].track); // each vehicle has its own circuit
+    phys.setVehicle(id); sound.setProfile(VEH[id].sound || id); buildSpeedo(VEH[id].speedoMax);
+    setTrack(trackFor(id)); // each vehicle has its own circuit
     buildGhostLine(); gap = null;
     resetRun();
     buildSwatches();
@@ -655,8 +742,13 @@
   $('btnSettings').addEventListener('click', openSettings);
   $('btnSetBack').addEventListener('click', closeSettings);
   document.querySelectorAll('.veh').forEach(function (b) { b.addEventListener('click', function () { if (VEH[b.dataset.veh].family !== VEH[myVeh].family) setVehicle(b.dataset.veh); }); });
-  $('btnLmp').addEventListener('click', function () { setVehicle(myVeh === 'lmp1' ? 'gt3' : 'lmp1'); this.blur(); });
+  ['btnLmp', 'btnSpa2'].forEach(function (id) { $(id).addEventListener('click', function () {
+    var tg = this.dataset.target || ''; this.blur();
+    if (tg.indexOf('place:') === 0) { save.driftTrack = tg.slice(6); persist(); setTrack(save.driftTrack); updateVehicleUi(); syncAiUi(); return; } // drifting: the other place
+    setVehicle(tg);
+  }); });
   updateVehicleUi();
+  if (lmpRevoked) { persist(); toast("LMP1 locked again: it now needs a GT3 lap under " + fmt(LMP_UNLOCK)); toastT = 6; } // the stricter unlock time took it back
 
   // online, each player who joins takes the next free place on the grid so cars do not start inside each other
   function gridPlace(sl) {
@@ -665,7 +757,7 @@
   }
   // At Spa the race starts from a standing grid: everybody presses Ready, then five red lights come on one second apart and go out.
   // Until then no car moves, the AI included. A player waits while anyone in the room is still on the start screen or has not pressed Ready.
-  var gridHold = false, readyMe = false, lightsT = -1, lampsOn = 0, gridSig = '', menuWait = 0, RANK = { lmp1: 0, gt3: 1, tford: 2 };
+  var gridHold = false, readyMe = false, lightsT = -1, lampsOn = 0, gridSig = '', menuWait = 0, RANK = { lmp1: 0, gt3: 1, miata: 2, tford: 3 };
   function gridSignature() {
     var a = [myVeh, K.id, aiCounts().join('.')];
     Object.keys(remotes).sort().forEach(function (id) { a.push(id, remotes[id].veh, remotes[id].pres ? remotes[id].pres.t : 0); });
@@ -695,7 +787,7 @@
   function setReady() { if (!gridHold || readyMe) return; readyMe = true; $('btnReady').hidden = true; sound.start(); }
   $('btnReady').addEventListener('click', function () { setReady(); this.blur(); });
   function holdStep() {
-    if (K.kind === 'oval') { endHold(false); return; }
+    if (K.kind === 'oval' || K.drift) { endHold(false); return; }
     var sig = gridSignature(); if (sig !== gridSig) { gridSig = sig; layoutGrid(); }
     // on a public server, drivers on the start screen do not count, a race in progress makes you wait for the next one,
     // and once anyone is ready the lights start within 30 seconds
@@ -731,7 +823,8 @@
     var first = state === 'menu';
     if (first) { if (K.kind === 'oval' && slot > 0) gridPlace(slot); joinedAt = Date.now(); }
     state = 'drive'; $('menu').hidden = true; $('pause').hidden = true; hud.hidden = false; sound.start();
-    if (first && K.kind !== 'oval') beginGrid();
+    if (K.drift) { } // drifting: no start lights, no race, just drive
+    else if (first && K.kind !== 'oval') beginGrid();
     else if (first) raceBegins(); // the speedway has no start lights: the race is on from the first moment
   }
   function pause() {
@@ -760,7 +853,7 @@
   function endRace() {
     finished = true; endT = 4.5;
     reportRace(posCls, nCls, false);
-    var cl = myVeh === 'lmp1' ? 'LMP1' : myVeh === 'gt3' ? 'GT3' : '';
+    var cl = myVeh === 'lmp1' ? 'LMP1' : myVeh === 'gt3' ? 'GT3' : myVeh === 'miata' ? 'MIATA' : '';
     toast('FINISHED · P' + posAll + ' of ' + nAll + (cl && nCls !== nAll ? ' · P' + posCls + ' ' + cl : '') + ' · ' + fmt(raceT), 'best'); toastT = endT;
   }
   $('menu').addEventListener('click', function (e) { if (!e.target.closest('.swatches, .ai-row, .online-row, .settings-btn, .lmp-btn')) startDrive(); });
@@ -780,7 +873,7 @@
     $('btnJoin').addEventListener('click', doJoin);
     net.onLost = function () { netMsg = 'The host left. You are driving alone.'; $('onlineRow').hidden = false; toast('Connection to the host lost'); };
   }
-  [['aiCount', 'ai', AI_MAX.tford], ['aiGt3', 'aiGt3', AI_MAX.gt3], ['aiLmp', 'aiLmp', AI_MAX.lmp1]].forEach(function (s) {
+  [['aiCount', 'ai', AI_MAX.tford], ['aiGt3', 'aiGt3', AI_MAX.gt3], ['aiLmp', 'aiLmp', AI_MAX.lmp1], ['aiMiata', 'aiMiata', AI_MAX.miata]].forEach(function (s) {
     var el = $(s[0]);
     el.addEventListener('input', function () { save[s[1]] = clamp(+this.value | 0, 0, s[2]); persist(); applyAiCounts(wantedCounts()); });
     el.addEventListener('change', function () { this.blur(); });
@@ -794,7 +887,7 @@
   raceLapsEl.addEventListener('change', function () { this.blur(); });
 
   // ---------- public servers, ranked races and the driver rating ----------
-  var PUB_WAIT = 30, pubT = -1, raceLive = false, raceRanked = false, CLASS_NAME = { tford: 'Model T', gt3: 'GT3', lmp1: 'LMP1' };
+  var PUB_WAIT = 30, pubT = -1, raceLive = false, raceRanked = false, CLASS_NAME = { tford: 'Model T', gt3: 'GT3', lmp1: 'LMP1', miata: 'Miata' };
   function pubCfg() { return net.code && net.PUBLIC && net.PUBLIC[net.code] || null; } // on one of the two public servers?
   function raceLaps() { return pubCfg() ? 10 : save.laps; }
   function loggedIn() { return !!(TF.account && TF.account.user && TF.account.user()); }
@@ -827,11 +920,11 @@
   function syncLocks() {
     var p = pubCfg(), guest = !p && onlineGuest(), on = rankedOn(), li = loggedIn();
     var key = [net.code, guest, on, li, raceLaps(), myVeh].join('|'); if (key === lockKey) return; lockKey = key;
-    $('rowRanked').hidden = !li;
+    $('rowRanked').hidden = !li || !!K.drift;
     rankedEl.checked = on; rankedEl.disabled = !!p || guest;
     $('rankedNote').textContent = p ? (on ? 'on · server' : 'off · server') : guest ? (on ? 'on · set by the host' : 'off · set by the host') : on ? 'on' : 'off';
     raceLapsEl.disabled = !!p; raceLapsEl.value = raceLaps(); $('raceLapsLabel').textContent = raceLaps();
-    if (p && myVeh === 'tford') setVehicle('gt3'); // the public servers race at Spa
+    if (p && (myVeh === 'tford' || VEH[myVeh].family === 'drift')) setVehicle('gt3'); // the public servers race at Spa
     applyAiCounts(wantedCounts()); syncAiUi();
     var sub = $('menuSub'); if (p) sub.textContent = p.name.toUpperCase() + ' · ' + net.code + ' · ' + VEH[myVeh].name.toUpperCase(); else updateVehicleUi();
   }
@@ -934,6 +1027,7 @@
     return { x: rd(r.x, 2), z: rd(r.z, 2), y: rd(r.y, 2), psi: rd(r.psi, 3), rx: rd(r.rx, 3), rz: rd(r.rz, 3), q: rd(r.q, 2) };
   }
   function finishLap(t) {
+    if (K.drift) return; // drifting: no laps, no records, no leaderboards
     lapsDone++;
     if (!lapValid) { toast('Lap ' + fmt(t) + ' not counted'); return; }
     if (!ownTrack()) { toast('Lap ' + fmt(t)); return; } // another player's circuit: no records
@@ -968,7 +1062,7 @@
         var over = ds > 0 ? clamp((q - (lap + 1) * LAP) / ds, 0, 1) * dt : 0;
         finishLap(lapT - over); raceT += lapT - over; raceCount++;
         lap++; lapT = over; lapValid = true; rec = newRec(); gp = 0;
-        if (!finished && raceCount >= raceLaps()) endRace();
+        if (!finished && !K.drift && raceCount >= raceLaps()) endRace();
       }
     }
     // record this lap for the ghost
@@ -1072,7 +1166,7 @@
       flashLight.position.set(phys.x + ffx * 2.2, loc.y + 0.7, phys.z + ffz * 2.2);
       flashLight.target.position.set(phys.x + ffx * 30, loc.y, phys.z + ffz * 30); flashLight.target.updateMatrixWorld();
     }
-    if (!car.userData.vehicle) car.userData.driver.visible = !(state === 'drive' && camMode === 'driver') && !(state === 'pause' && camMode === 'driver'); // (the GT3 and prototype have no driver at all)
+    if (!car.userData.vehicle || car.userData.openTop) car.userData.driver.visible = !(state === 'drive' && camMode === 'driver') && !(state === 'pause' && camMode === 'driver'); // (the GT3 and prototype have no driver at all)
     car.updateMatrixWorld(true);
     world.followSun(phys.x, loc.y, phys.z);
   }
@@ -1156,6 +1250,24 @@
   TF.game = {
     // test hook: render one frame at a given size and return it as a JPEG data URL, whatever the preview pane is doing
     setCamOverride: function (o) { camOverride = o; },
+    // test hook: drive only the AI cars for a while without drawing anything, and report every car's lap times
+    aiStep: function (dt) { for (var i = 0; i < ais.length; i++) driveAi(ais[i], dt); collideCars(); }, // test hook: one AI step, nothing drawn
+    aiLapTest: function (secs, opt) {
+      opt = opt || {}; var dt = 1 / 60, px = phys.x, pz = phys.z; phys.x += 9000; phys.z += 9000; // my car out of the way
+      var rec = ais.map(function (a) { a.phys.ps = null; trackProgress(a.phys); a.resets = 0; return { veh: a.veh, num: a.num, pace: +a.spec.pace.toFixed(4), grp: a.grp, laps: [], lapN: Math.floor(a.phys.pg / LAP), t0: null, off: 0 }; });
+      for (var t = 0; t < secs; t += dt) {
+        for (var i = 0; i < ais.length; i++) driveAi(ais[i], dt);
+        collideCars();
+        for (i = 0; i < ais.length; i++) {
+          var a = ais[i], r = rec[i]; trackProgress(a.phys);
+          if (a.phys.surface !== 'road') r.off += dt;
+          var n = Math.floor(a.phys.pg / LAP);
+          if (n > r.lapN) { if (r.t0 !== null) r.laps.push(+(t - r.t0).toFixed(2)); r.t0 = t; r.lapN = n; }
+        }
+      }
+      phys.x = px; phys.z = pz;
+      return rec.map(function (r, i) { r.resets = ais[i].resets; r.off = +r.off.toFixed(1); return r; });
+    },
     snapshot: function (w, h) {
       var ow = window.innerWidth, oh = window.innerHeight; renderer.setPixelRatio(1); renderer.setSize(w, h, false); cam.aspect = w / h; cam.updateProjectionMatrix();
       updateCamera(0); renderer.render(scene, cam); var url = renderer.domElement.toDataURL('image/jpeg', 0.88);
@@ -1164,7 +1276,7 @@
     rankedOn: function () { return rankedOn(); }, pub: function () { return pubCfg(); },
     raceInfo: function () { return { count: raceCount, laps: raceLaps(), live: raceLive, ranked: raceRanked, posCls: posCls, nCls: nCls, finished: finished, endT: endT, raceT: raceT, state: state }; },
     unlockLmp: function (on) { save.lmpOk = on !== false; updateVehicleUi(); }, finishLapTest: function (t) { lapValid = true; finishLap(t); },
-    phys: phys, fx: fx, ais: ais, kick: playerKick, onShift: onShift, boostInfo: function () { return { e: phys.boostE, on: phys.boosting }; }, setVehicle: setVehicle, setTrack: setTrack, trackId: function () { return K.id; }, vehicle: function () { return myVeh; }, aiKinds: aiCounts, setAiMix: function (g, l) { save.aiGt3 = clamp(g | 0, 0, 20); save.aiLmp = clamp(l | 0, 0, 10); applyAiCounts(wantedCounts()); },
+    phys: phys, fx: fx, ais: ais, kick: playerKick, onShift: onShift, boostInfo: function () { return { e: phys.boostE, on: phys.boosting }; }, setVehicle: setVehicle, setTrack: setTrack, trackId: function () { return K.id; }, vehicle: function () { return myVeh; }, aiKinds: aiCounts, setAiMix: function (g, l, m) { save.aiGt3 = clamp(g | 0, 0, 20); save.aiLmp = clamp(l | 0, 0, 10); if (m != null) save.aiMiata = clamp(m | 0, 0, 20); applyAiCounts(wantedCounts()); },
     flashInfo: function () { return { flT: me.flT, seq: flashSeq, intensity: flashLight.intensity }; },
     netInfo: function () { return { status: net.status, online: online, isHost: isHost, slot: slot, me: myPeer, remotes: Object.keys(remotes).map(function (id) { var p = remotes[id].phys; return { id: id, x: r2(p.x), z: r2(p.z), u: r2(p.u), wobble: p.wobble }; }), ais: ais.length, aiRemote: ais.length ? !!ais[0].phys.remote : null, ai0: ais.length ? [r2(ais[0].phys.x), r2(ais[0].phys.z)] : null }; }, buildGhostLine: buildGhostLine, hasGhostLine: function () { return !!ghostLine; }, setAiCount: setAiCount, keys: function () { return keys; }, tick: tick, start: startDrive, save: save,
     info: function () { return { track: K.id, state: state, lap: lap, lapT: lapT, q: q, valid: lapValid, best: save.best, gap: gap, kmh: Math.abs(phys.u) * 3.6, s: phys.loc.s, d: phys.loc.d, lapsDone: lapsDone, cam: camMode }; },

@@ -113,7 +113,7 @@ export default {
     if (!originOk(request.headers.get('Origin'))) return new Response('Not allowed', { status: 403 });
     if (m[1] === 'RANKD') { // the ranked server checks the rating itself, so the 1250 rule cannot be skipped
       const t = url.searchParams.get('t') || '', veh = url.searchParams.get('veh');
-      if (!/^[0-9a-f]{64}$/.test(t) || (veh !== 'gt3' && veh !== 'lmp1')) return refuse('rank-login');
+      if (!/^[0-9a-f]{64}$/.test(t) || (veh !== 'gt3' && veh !== 'lmp1' && veh !== 'miata')) return refuse('rank-login');
       let r = null;
       try { const j = await (await accounts().fetch(new Request('https://accounts/auth/elo', { headers: { Authorization: 'Bearer ' + t } }))).json(); r = j.ok ? j.r : null; } catch (e) { r = null; }
       if (!r) return refuse('rank-login');

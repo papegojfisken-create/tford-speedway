@@ -13,6 +13,7 @@ The original licence texts are in the `LICENSE-*.txt` files.
 | GT3, Aston Martin (green) | [Aston Martin Vantage GT3](https://sketchfab.com/3d-models/aston-martin-vantage-gt3-fbd3494e950c40ecb536f1335296345d) | Design Studio Poland | CC-BY-4.0 | `js/gt3_aston.js` |
 | GT3, BMW (blue) | [2025 BMW M4 GT3 EVO G82](https://sketchfab.com/3d-models/2025-bmw-m4-gt3-evo-g82-113f83dd87064697a5ec2511d280b9d5) | Ddiaz Design | **CC-BY-NC-SA-4.0** | `js/gt3_bmw.js` |
 | GT3, Audi (black) | [2009 Audi R8 LMS](https://sketchfab.com/3d-models/2009-audi-r8-lms-e98ea154b9b34a5eaa72092caa7d9832) | OUTPISTON | **CC-BY-NC-SA-4.0** | `js/gt3_audi.js` |
+| Miata Cup (all colours) | [1989 mazda miata mx-5 (na)](https://sketchfab.com/3d-models/1989-mazda-miata-mx-5-na-2f14a85e4a80433ebf3d0a15467fe691) | amogusstrikesback2 | CC-BY-4.0 | `js/miata_data.js` |
 
 ## What the licences mean here
 
