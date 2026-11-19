@@ -99,17 +99,10 @@
     aiG: 17.5, aiVmax: 70, aiDecel: 17 // with the learned Spa map a lone AI Miata laps in 2:17 (the AI GT3 1:57, the AI LMP1 1:37)
   });
 
-  // Drifting: the Miata and the GT3 set up to slide. The rear grips clearly less than the front, the steering turns much further
-  // (so you can hold a big angle) and the automatic counter-steer is weak, so the car stays sideways when you want it to.
-  // They drive on the drift track or the parking lot ('track' is chosen in the game), with no laps, AI, ratings or leaderboards.
-  VEHICLES.dmiata = Object.assign({}, VEHICLES.miata, {
-    id: 'dmiata', name: 'Miata', family: 'drift', sound: 'miata', track: 'drift',
-    gripFront: 9.8, gripRear: 7.3, assist: 0.22, steerSlow: 0.65, steerFast: 0.32, steerExp: 0.4, engine: 11
-  });
-  VEHICLES.dgt3 = Object.assign({}, VEHICLES.gt3, {
-    id: 'dgt3', name: 'GT3', family: 'drift', sound: 'gt3', track: 'drift', shiftText: 'flash headlights',
-    gripFront: 10.5, gripRear: 7.9, downforce: 0.00005, assist: 0.22, steerSlow: 0.6, steerFast: 0.28, steerExp: 0.4
-  });
+  // Drifting mode: the Miata and the GT3, handling exactly like the normal cars (no special drift set-up), on the drift track or
+  // the parking lot ('track' is chosen in the game), with no laps, AI, ratings or leaderboards.
+  VEHICLES.dmiata = Object.assign({}, VEHICLES.miata, { id: 'dmiata', name: 'Miata', family: 'drift', sound: 'miata', track: 'drift' });
+  VEHICLES.dgt3 = Object.assign({}, VEHICLES.gt3, { id: 'dgt3', name: 'GT3', family: 'drift', sound: 'gt3', track: 'drift', shiftText: 'flash headlights' });
 
   function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
   function wrapPi(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }
