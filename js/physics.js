@@ -101,8 +101,8 @@
 
   // Drifting mode: the Miata and the GT3, handling exactly like the normal cars (no special drift set-up), on the drift track or
   // the parking lot ('track' is chosen in the game), with no laps, AI, ratings or leaderboards.
-  VEHICLES.dmiata = Object.assign({}, VEHICLES.miata, { id: 'dmiata', name: 'Miata', family: 'drift', sound: 'miata', track: 'drift' });
-  VEHICLES.dgt3 = Object.assign({}, VEHICLES.gt3, { id: 'dgt3', name: 'GT3', family: 'drift', sound: 'gt3', track: 'drift', shiftText: 'flash headlights' });
+  VEHICLES.dmiata = Object.assign({}, VEHICLES.miata, { id: 'dmiata', family: 'drift', sound: 'miata', track: 'drift' });
+  VEHICLES.dgt3 = Object.assign({}, VEHICLES.gt3, { id: 'dgt3', family: 'drift', sound: 'gt3', track: 'drift', shiftText: 'flash headlights' });
 
   function clamp(x, a, b) { return x < a ? a : x > b ? b : x; }
   function wrapPi(a) { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; }

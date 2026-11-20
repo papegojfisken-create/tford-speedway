@@ -17,7 +17,7 @@
   var VEH = TF.VEHICLES;
   // Best lap and ghost are kept per vehicle: save.best / save.ghost belong to the vehicle in use, the other one waits in save.store.
   // ai = Model T drivers on the speedway, aiGt3 and aiLmp = GT3 and LMP1 drivers at Spa.
-  var LMP_UNLOCK = 115; // seconds: a GT3 lap under 1:55 at Spa unlocks the LMP1 (it was 1:59 before)
+  var LMP_UNLOCK = 116; // seconds: a GT3 lap under 1:56 at Spa unlocks the LMP1 (it was 1:59 before)
   var lmpRevoked = false; // set when a saved game had the LMP1 without a GT3 lap that fast: it is taken back
   var save = { ranked: false, driftTrack: 'drift', laps: 5, lmpOk: false, num: 7, color: 0, best: null, ghost: null, ai: 3, aiGt3: 8, aiLmp: 3, aiMiata: 10, veh: 'miata', store: {} }; // new players start in the beginner-friendly Miata Cup at Spa; a saved choice still wins
   // a saved lap only counts if it was driven on the circuit this vehicle uses now (laps saved before there were two circuits are 'classic')
